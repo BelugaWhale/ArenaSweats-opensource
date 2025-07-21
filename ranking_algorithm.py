@@ -1,5 +1,6 @@
 import trueskill
 from collections import defaultdict
+import math
 
 '''
 The TrueSkill rating system, a sophisticated algorithm developed by Microsoft, assesses player skill in multiplayer games through a Bayesian approach.
@@ -93,9 +94,13 @@ def instantiate_trueskill():
     return trueskill.TrueSkill(draw_probability=0.0)
 
 
+import math
+from collections import defaultdict
+
 def process_game_ratings(env, players, game_id, player_ratings, logger):
     """
-    Process a single game's ratings update using TrueSkill.
+    Process a single game's ratings update using TrueSkill with manual team composition and uncertainty-based distribution.
+    Assumes exactly 8 teams of 2 players each (16 players total).
     
     Args:
         env: TrueSkill environment
@@ -112,37 +117,71 @@ def process_game_ratings(env, players, game_id, player_ratings, logger):
     for player_id, team_placing in players:
         teams_by_placing[team_placing].append(player_id)
     
-    # Arena has 8 teams of 2 players, if we don't have this there is an issue with the data and the game should not be processed. (Less than 100 games are failing across all regions atm)
-    # Verify we have exactly 8 teams 
+    # Verify exactly 8 teams of 2 players each
     if len(teams_by_placing) != 8:
         logger.warning(f"Game {game_id} has {len(teams_by_placing)} teams, expected 8")
         return False, player_ratings
     
-    # Check that each team has exactly 2 players
     for placing, team_players in teams_by_placing.items():
         if len(team_players) != 2:
             logger.warning(f"Game {game_id} team placing {placing} has {len(team_players)} players, expected 2")
             return False, player_ratings
     
-    # Prepare teams and ranks for TrueSkill without modifying player_ratings
-    teams = []
-    ranks = []
-    for placing in sorted(teams_by_placing.keys()):
-        team_players = teams_by_placing[placing]
-        team_ratings = [player_ratings.get(pid, env.Rating()) for pid in team_players]
-        teams.append(team_ratings)
-        ranks.append(placing - 1)  # Convert 1-8 placing to 0-7 ranks
+    # Prepare team data: each entry has placing, composite rating, and player info
+    teams_data = []
+    beta_sq = env.beta ** 2
     
-    # Update ratings using TrueSkill
-    try:
-        new_teams = env.rate(teams, ranks=ranks)
+    for placing in sorted(teams_by_placing.keys()):  # Ensure 1,2,...,8
+        team_players = teams_by_placing[placing]
+        # Get player data: pid1, mu1, sigma1, pid2, mu2, sigma2
+        rating1 = player_ratings.get(team_players[0], env.Rating())
+        rating2 = player_ratings.get(team_players[1], env.Rating())
+        pid1, mu1, sigma1 = team_players[0], rating1.mu, rating1.sigma
+        pid2, mu2, sigma2 = team_players[1], rating2.mu, rating2.sigma
         
-        # Update player_ratings in place (adds new players if needed)
-        for i, new_team in enumerate(new_teams):
-            placing = ranks[i] + 1  # Convert back to 1-8 placing
-            team_players = teams_by_placing[placing]
-            for j, pid in enumerate(team_players):
-                player_ratings[pid] = new_team[j]
+        # Compute composite team rating (team_size=2)
+        team_mu = mu1 + mu2
+        team_variance = (sigma1 ** 2) + (sigma2 ** 2) + beta_sq  # + (2-1)*beta_sq
+        team_sigma = math.sqrt(team_variance)
+        
+        # Store team data
+        teams_data.append({
+            'placing': placing,
+            'rank': placing - 1,  # 1->0, 2->1, ..., 8->7 for TrueSkill
+            'composite_rating': env.Rating(team_mu, team_sigma),
+            'pid1': pid1, 'mu1': mu1, 'sigma1': sigma1,
+            'pid2': pid2, 'mu2': mu2, 'sigma2': sigma2,
+            'old_variance': team_variance
+        })
+    
+    # Rate the composite teams as single-entity groups
+    try:
+        team_groups = [[team['composite_rating']] for team in teams_data]
+        ranks = [team['rank'] for team in teams_data]
+        new_team_groups = env.rate(team_groups, ranks=ranks)
+        new_composite_ratings = [group[0] for group in new_team_groups]
+        
+        # Distribute updates back to players using uncertainty proportions
+        for i, team in enumerate(teams_data):
+            new_rating = new_composite_ratings[i]
+            old_rating = team['composite_rating']
+            delta_mu = new_rating.mu - old_rating.mu
+            old_variance = team['old_variance']
+            new_variance = new_rating.sigma ** 2
+            
+            # Player 1
+            weight1 = (team['sigma1'] ** 2) / old_variance
+            new_mu1 = team['mu1'] + weight1 * delta_mu
+            new_sigma_sq1 = (team['sigma1'] ** 2) * (1 - weight1) + (weight1 ** 2) * new_variance
+            new_sigma1 = math.sqrt(new_sigma_sq1)
+            player_ratings[team['pid1']] = env.Rating(new_mu1, new_sigma1)
+            
+            # Player 2
+            weight2 = (team['sigma2'] ** 2) / old_variance
+            new_mu2 = team['mu2'] + weight2 * delta_mu
+            new_sigma_sq2 = (team['sigma2'] ** 2) * (1 - weight2) + (weight2 ** 2) * new_variance
+            new_sigma2 = math.sqrt(new_sigma_sq2)
+            player_ratings[team['pid2']] = env.Rating(new_mu2, new_sigma2)
         
         return True, player_ratings
         
