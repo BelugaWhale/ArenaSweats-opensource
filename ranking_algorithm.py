@@ -162,10 +162,6 @@ def process_game_ratings(env, players, game_id, player_ratings, logger):
         new_team_groups = env.rate(team_groups, ranks=ranks)
         new_composite_ratings = [group[0] for group in new_team_groups]
         
-        # 1 in 100 chance to log using teamrating method
-        if random.randint(1, 100) == 1:
-            logger.info(f"Game {game_id} teamrating method - Teams: {[(team['placing'], team['composite_rating'].mu, team['composite_rating'].sigma) for team in teams_data]}")
-        
         # Distribute updates back to players using uncertainty proportions
         for i, team in enumerate(teams_data):
             new_rating = new_composite_ratings[i]
