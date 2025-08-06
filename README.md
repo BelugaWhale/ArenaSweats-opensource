@@ -20,7 +20,7 @@ This repository's purpose is to bring these principles to life, being the real l
 
 **This is PROOF of ArenaSweats leaderboard integrity.**
 
-## 🧮 How the Ranking System Works
+## 🧮 The Current ArenaSweats Ranked Algorithm
 
 ### 🎮 The TrueSkill Algorithm
 
