@@ -36,10 +36,10 @@ def calculate_rating(trueskill_rating, games_played):
 
     """
     MODIFICATION 1/1 to TrueSkill algorithm. (THE LOW GAMES CLAMP)
-    "A player's sigma is highest when they are new to the system." 
-    Practically this has lead to a few players having not many games played and a very high skill estimate. To resolve this a scaling factor has been applied. The player's skill estimate is 80% of the TrueSkill rating at 0 games played, and 100% of the TrueSkill rating at 30 games played. This scales linearly.
+    "A player's sigma is highest when they are new to the system."
+    Practically this has lead to a few players having not many games played and a very high skill estimate. To resolve this a scaling factor has been applied. The player's skill estimate is 50% of the TrueSkill rating at 0 games played, and 100% of the TrueSkill rating at 40 games played. This scales linearly.
     """
-    scaling_factor = 0.8 + min(games_played, 30) / 30 * 0.2
+    scaling_factor = 0.5 + min(games_played, 40) / 40 * 0.5
     return round(base_rating * scaling_factor)
 
 
@@ -113,6 +113,11 @@ def process_game_ratings(env, players, game_id, player_ratings, logger):
     Returns:
         tuple: (success: bool, updated_player_ratings: dict)
     """
+    # Verify exactly 16 players
+    if len(players) != 16:
+        logger.warning(f"Game {game_id} has {len(players)} players, expected 16")
+        return False, player_ratings
+    
     # Group players by team_placing (1-8)
     teams_by_placing = defaultdict(list)
     for player_id, team_placing in players:
