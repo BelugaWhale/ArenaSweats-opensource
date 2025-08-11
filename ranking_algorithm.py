@@ -73,7 +73,7 @@ def instantiate_rating_model():
     CURRENTLY ALL PARAMETERS ARE SET TO DEFAULT
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    return PlackettLuce(beta=(25/6) * (1/1000), tau=(25/300) * (1/200))
+    return PlackettLuce(beta=(25/6) * (1/1000), tau=(25/300) * (1/200), sigma=(25/3) * (1/2))
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
