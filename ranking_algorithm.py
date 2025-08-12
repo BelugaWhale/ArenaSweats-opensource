@@ -114,7 +114,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
     teams = []
     for placing in sorted(teams_by_placing.keys()):  # 1 to 8
         team_players = teams_by_placing[placing]
-        team_ratings = [player_ratings.get(pid, model.rating()) for pid in team_players]
+        team_ratings = [player_ratings.get(pid, model.Rating()) for pid in team_players]
         teams.append(team_ratings)
     
     # Ranks: lower number is better (0 for placing 1, 1 for placing 2, ..., 7 for placing 8)
