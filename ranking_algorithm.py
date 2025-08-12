@@ -1,6 +1,6 @@
 import math
 from collections import defaultdict
-from openskill.models import PlackettLuce
+import trueskill
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -73,7 +73,7 @@ def instantiate_rating_model():
     CURRENTLY ALL PARAMETERS ARE SET TO DEFAULT
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    return PlackettLuce(beta=(25/6) * (1/1000), tau=(25/300) * (1/200), sigma=(25/3) * (1/2))
+    return trueskill.TrueSkill(draw_probability=0.0)
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
