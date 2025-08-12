@@ -73,7 +73,7 @@ def instantiate_rating_model():
     CURRENTLY ALL PARAMETERS ARE SET TO DEFAULT
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    return ThurstoneMostellerFull(limit_sigma=True)
+    return ThurstoneMostellerFull(beta=25, tau=0.25, limit_sigma=True)
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
