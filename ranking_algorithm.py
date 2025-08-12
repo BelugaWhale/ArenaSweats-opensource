@@ -1,6 +1,6 @@
 import math
 from collections import defaultdict
-import trueskill
+from openskill.models import ThurstoneMostellerFull
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -73,7 +73,7 @@ def instantiate_rating_model():
     CURRENTLY ALL PARAMETERS ARE SET TO DEFAULT
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    return trueskill.TrueSkill(draw_probability=0.0)
+    return ThurstoneMostellerFull()
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
@@ -114,7 +114,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
     teams = []
     for placing in sorted(teams_by_placing.keys()):  # 1 to 8
         team_players = teams_by_placing[placing]
-        team_ratings = [player_ratings.get(pid, model.Rating()) for pid in team_players]
+        team_ratings = [player_ratings.get(pid, model.rating()) for pid in team_players]
         teams.append(team_ratings)
     
     # Ranks: lower number is better (0 for placing 1, 1 for placing 2, ..., 7 for placing 8)
