@@ -21,7 +21,7 @@ def calculate_rating(rating, games_played):
     Microsoft research recommends using mu-3*sigma as the "conservative skill estimate" for TrueSkill, and this is commonly applied in similar systems like OpenSkill.
     https://www.microsoft.com/en-us/research/project/trueskill-ranking-system/
     """
-    base_rating = (rating.mu - 3 * rating.sigma)
+    base_rating = (rating.mu - 3 * rating.sigma) * 75
     """
     MODIFICATION 1/1 to the algorithm. (THE LOW GAMES CLAMP)
     "A player's sigma is highest when they are new to the system."
