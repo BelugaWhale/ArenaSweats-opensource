@@ -1,6 +1,8 @@
 import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
+
+ALPHA = 0.01
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -75,6 +77,63 @@ def instantiate_rating_model():
     # This instantiation creates a model for games with strict rankings (no draws).
     return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
 
+def apply_convergence(model, teams, new_teams, alpha=ALPHA):
+    """
+    Apply convergence logic to team ratings after model.rate update.
+    This function modifies new_teams in place to implement mu-based convergence
+    that favors lower-rated players in positive updates and protects them in negative ones.
+    """
+    for i in range(len(teams)):
+        old_p1 = teams[i][0]
+        old_p2 = teams[i][1]
+        new_p1_temp = new_teams[i][0]
+        new_p2_temp = new_teams[i][1]
+
+        # Compute team-level changes from library update
+        old_mu_team = old_p1.mu + old_p2.mu
+        new_mu_team = new_p1_temp.mu + new_p2_temp.mu
+        delta_mu_team = new_mu_team - old_mu_team
+
+        # Mu preservation (equal change, maintains original gap)
+        mu_pres_1 = old_p1.mu + delta_mu_team / 2
+        mu_pres_2 = old_p2.mu + delta_mu_team / 2
+
+        # Mu equalization (identical ratings)
+        mu_equal = new_mu_team / 2
+
+        # Converged mu
+        final_mu_1 = (1 - alpha) * mu_pres_1 + alpha * mu_equal
+        final_mu_2 = (1 - alpha) * mu_pres_2 + alpha * mu_equal
+
+        # Var updates
+        old_var_1 = old_p1.sigma ** 2
+        old_var_2 = old_p2.sigma ** 2
+        var_old_sum = old_var_1 + old_var_2
+        new_var_team = new_p1_temp.sigma ** 2 + new_p2_temp.sigma ** 2
+
+        if var_old_sum == 0:  # Edge case: equal split
+            var_prop_1 = new_var_team / 2
+            var_prop_2 = new_var_team / 2
+        else:
+            var_prop_1 = (old_var_1 / var_old_sum) * new_var_team
+            var_prop_2 = (old_var_2 / var_old_sum) * new_var_team
+
+        var_equal = new_var_team / 2
+
+        # Converged var (blend preserves sum)
+        final_var_1 = (1 - alpha) * var_prop_1 + alpha * var_equal
+        final_var_2 = (1 - alpha) * var_prop_2 + alpha * var_equal
+
+        # Sigmas (stable, as vars >= 0)
+        final_sigma_1 = math.sqrt(final_var_1)
+        final_sigma_2 = math.sqrt(final_var_2)
+
+        # Replace with converged ratings
+        new_teams[i] = [
+            model.rating(mu=final_mu_1, sigma=final_sigma_1),
+            model.rating(mu=final_mu_2, sigma=final_sigma_2)
+        ]
+
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
     Process a single game's ratings update using OpenSkill Plackett-Luce with direct team support.
@@ -123,6 +182,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
     # Rate the teams directly
     try:
         new_teams = model.rate(teams, ranks=ranks)
+        apply_convergence(model, teams, new_teams)
         
         # Update player_ratings
         sorted_placings = sorted(teams_by_placing.keys())
@@ -137,3 +197,73 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
     except Exception as e:
         logger.error(f"Failed to update ratings for game {game_id}: {e}")
         return False, player_ratings
+
+def test_convergence():
+    """
+    Test function to verify convergence implementation.
+    Creates a simple 2-team scenario (test team wins, dummy loses) and checks the convergence behavior.
+    """
+    model = instantiate_rating_model()
+    
+    # Create test team players with different ratings
+    player1 = model.rating(mu=25, sigma=8)  # Lower mu, higher sigma
+    player2 = model.rating(mu=35, sigma=6)  # Higher mu, lower sigma
+    
+    # Dummy team (average ratings, will lose)
+    dummy1 = model.rating(mu=30, sigma=7)
+    dummy2 = model.rating(mu=30, sigma=7)
+    
+    print(f"Before test team: Player1 mu={player1.mu:.2f}, sigma={player1.sigma:.2f}")
+    print(f"Before test team: Player2 mu={player2.mu:.2f}, sigma={player2.sigma:.2f}")
+    
+    # Create teams structure (test team rank 0: wins, dummy rank 1: loses)
+    teams = [[player1, player2], [dummy1, dummy2]]
+    ranks = [0, 1]
+    
+    # Get standard library update
+    new_teams_standard = model.rate(teams, ranks=ranks)
+    
+    # Get convergence update
+    new_teams_convergence = model.rate(teams, ranks=ranks)
+    apply_convergence(model, teams, new_teams_convergence)
+    
+    print(f"\nStandard update for test team:")
+    print(f"Player1 mu={new_teams_standard[0][0].mu:.2f}, sigma={new_teams_standard[0][0].sigma:.2f}")
+    print(f"Player2 mu={new_teams_standard[0][1].mu:.2f}, sigma={new_teams_standard[0][1].sigma:.2f}")
+    
+    print(f"\nWith convergence for test team:")
+    print(f"Player1 mu={new_teams_convergence[0][0].mu:.2f}, sigma={new_teams_convergence[0][0].sigma:.2f}")
+    print(f"Player2 mu={new_teams_convergence[0][1].mu:.2f}, sigma={new_teams_convergence[0][1].sigma:.2f}")
+    
+    # Verify total mu preservation for test team
+    old_total_mu = player1.mu + player2.mu
+    standard_total_mu = new_teams_standard[0][0].mu + new_teams_standard[0][1].mu
+    convergence_total_mu = new_teams_convergence[0][0].mu + new_teams_convergence[0][1].mu
+    
+    print(f"\nMu totals for test team:")
+    print(f"Original: {old_total_mu:.2f}")
+    print(f"Standard: {standard_total_mu:.2f}")
+    print(f"Convergence: {convergence_total_mu:.2f}")
+    print(f"Mu preservation check: {abs(standard_total_mu - convergence_total_mu) < 0.001}")
+    
+    # Verify total variance preservation for test team
+    old_total_var = player1.sigma**2 + player2.sigma**2
+    standard_total_var = new_teams_standard[0][0].sigma**2 + new_teams_standard[0][1].sigma**2
+    convergence_total_var = new_teams_convergence[0][0].sigma**2 + new_teams_convergence[0][1].sigma**2
+    
+    print(f"\nVariance totals for test team:")
+    print(f"Original: {old_total_var:.2f}")
+    print(f"Standard: {standard_total_var:.2f}")
+    print(f"Convergence: {convergence_total_var:.2f}")
+    print(f"Variance preservation check: {abs(standard_total_var - convergence_total_var) < 0.001}")
+    
+    # Check gap reduction
+    old_mu_gap = abs(player1.mu - player2.mu)
+    convergence_mu_gap = abs(new_teams_convergence[0][0].mu - new_teams_convergence[0][1].mu)
+    print(f"\nGap reduction for test team:")
+    print(f"Original mu gap: {old_mu_gap:.2f}")
+    print(f"Convergence mu gap: {convergence_mu_gap:.2f}")
+    print(f"Mu gap reduced: {convergence_mu_gap < old_mu_gap}")
+    
+if __name__ == "__main__":
+    test_convergence()
