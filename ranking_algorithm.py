@@ -85,7 +85,7 @@ def apply_convergence(model, teams, new_teams, alpha=ALPHA):
     Now with boosted dynamic alpha_eff to penalize large initial mu differences more strongly
     while minimizing impact on small differences. Normalized by beta for consistency with the model.
     """
-    CONVERGENCE_STRENGTH = 1.0  # Single tunable param: higher = stronger penalty on large gaps
+    CONVERGENCE_STRENGTH = 2.0  # Single tunable param: higher = stronger penalty on large gaps
     for i in range(len(teams)):
         old_p1 = teams[i][0]
         old_p2 = teams[i][1]
