@@ -82,12 +82,20 @@ def apply_convergence(model, teams, new_teams, alpha=ALPHA):
     Apply convergence logic to team ratings after model.rate update.
     This function modifies new_teams in place to implement mu-based convergence
     that favors lower-rated players in positive updates and protects them in negative ones.
+    Now with boosted dynamic alpha_eff to penalize large initial mu differences more strongly
+    while minimizing impact on small differences. Normalized by beta for consistency with the model.
     """
+    CONVERGENCE_STRENGTH = 1.0  # Single tunable param: higher = stronger penalty on large gaps
     for i in range(len(teams)):
         old_p1 = teams[i][0]
         old_p2 = teams[i][1]
         new_p1_temp = new_teams[i][0]
         new_p2_temp = new_teams[i][1]
+
+        # Compute initial mu difference for dynamic alpha
+        diff = abs(old_p1.mu - old_p2.mu)
+        alpha_eff = CONVERGENCE_STRENGTH * alpha * (diff / model.beta) ** 2  # Quadratic scaling, beta-normalized
+        alpha_eff = min(alpha_eff, 0.1)  # Cap for stability (20% max closure per game)
 
         # Compute team-level changes from library update
         old_mu_team = old_p1.mu + old_p2.mu
@@ -101,9 +109,9 @@ def apply_convergence(model, teams, new_teams, alpha=ALPHA):
         # Mu equalization (identical ratings)
         mu_equal = new_mu_team / 2
 
-        # Converged mu
-        final_mu_1 = (1 - alpha) * mu_pres_1 + alpha * mu_equal
-        final_mu_2 = (1 - alpha) * mu_pres_2 + alpha * mu_equal
+        # Converged mu (use alpha_eff)
+        final_mu_1 = (1 - alpha_eff) * mu_pres_1 + alpha_eff * mu_equal
+        final_mu_2 = (1 - alpha_eff) * mu_pres_2 + alpha_eff * mu_equal
 
         # Var updates
         old_var_1 = old_p1.sigma ** 2
@@ -120,9 +128,9 @@ def apply_convergence(model, teams, new_teams, alpha=ALPHA):
 
         var_equal = new_var_team / 2
 
-        # Converged var (blend preserves sum)
-        final_var_1 = (1 - alpha) * var_prop_1 + alpha * var_equal
-        final_var_2 = (1 - alpha) * var_prop_2 + alpha * var_equal
+        # Converged var (blend preserves sum; use alpha_eff)
+        final_var_1 = (1 - alpha_eff) * var_prop_1 + alpha_eff * var_equal
+        final_var_2 = (1 - alpha_eff) * var_prop_2 + alpha_eff * var_equal
 
         # Sigmas (stable, as vars >= 0)
         final_sigma_1 = math.sqrt(final_var_1)
@@ -136,11 +144,11 @@ def apply_convergence(model, teams, new_teams, alpha=ALPHA):
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
-    Process a single game's ratings update using OpenSkill Plackett-Luce with direct team support.
+    Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
     Assumes exactly 8 teams of 2 players each (16 players total).
     
     Args:
-        model: PlackettLuce model instance
+        model: ThurstoneMostellerFull model instance
         players: List of (player_id, team_placing) tuples
         game_id: Game identifier for logging
         player_ratings: Dictionary of player_id -> Rating
