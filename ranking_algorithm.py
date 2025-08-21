@@ -84,7 +84,7 @@ def apply_convergence(model, teams, new_teams):
     Variances are taken directly from OpenSkill's updates.
     Dynamic bias quadratic in initial mu diff and beta-normalized.
     """
-    CONVERGENCE_STRENGTH = 0.006  # Single tunable param: higher = stronger bias on large gaps
+    CONVERGENCE_STRENGTH = 0.165  # Single tunable param: higher = stronger bias on large gaps
     for i in range(len(teams)):
         old_p1 = teams[i][0]
         old_p2 = teams[i][1]
