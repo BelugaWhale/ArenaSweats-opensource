@@ -2,7 +2,6 @@ import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
 
-ALPHA = 0.01
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -77,65 +76,75 @@ def instantiate_rating_model():
     # This instantiation creates a model for games with strict rankings (no draws).
     return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
 
-def apply_convergence(model, teams, new_teams, alpha=ALPHA):
+def apply_convergence(model, teams, new_teams):
     """
     Apply convergence logic to team ratings after model.rate update.
     This function modifies new_teams in place to implement mu-based convergence
-    that favors lower-rated players in positive updates and protects them in negative ones.
-    Now with boosted dynamic alpha_eff to penalize large initial mu differences more strongly
-    while minimizing impact on small differences. Normalized by beta for consistency with the model.
+    by unevenly distributing the team mu delta, favoring lower-rated players in positive updates 
+    and protecting them in negative ones. For sigma, similarly distribute the team variance delta
+    using the same modifiers, but flipped for positive deltas to give more uncertainty reduction 
+    (less added variance) to the player with larger mu modifier.
+    Dynamic bias quadratic in initial mu diff and beta-normalized.
     """
-    CONVERGENCE_STRENGTH = 2.0  # Single tunable param: higher = stronger penalty on large gaps
+    CONVERGENCE_STRENGTH = 0.006  # Single tunable param: higher = stronger bias on large gaps
     for i in range(len(teams)):
         old_p1 = teams[i][0]
         old_p2 = teams[i][1]
         new_p1_temp = new_teams[i][0]
         new_p2_temp = new_teams[i][1]
-
-        # Compute initial mu difference for dynamic alpha
+        
+        # Compute initial mu difference for dynamic bias
         diff = abs(old_p1.mu - old_p2.mu)
-        alpha_eff = CONVERGENCE_STRENGTH * alpha * (diff / model.beta) ** 2  # Quadratic scaling, beta-normalized
-        alpha_eff = min(alpha_eff, 0.1)  # Cap for stability (20% max closure per game)
-
-        # Compute team-level changes from library update
+        bias = CONVERGENCE_STRENGTH * (diff / model.beta) ** 2
+        bias = min(bias, 0.4)  # Cap for mu bias (<0.5 for stability)
+        
+        # Compute team-level mu delta from library update
         old_mu_team = old_p1.mu + old_p2.mu
         new_mu_team = new_p1_temp.mu + new_p2_temp.mu
         delta_mu_team = new_mu_team - old_mu_team
-
-        # Mu preservation (equal change, maintains original gap)
-        mu_pres_1 = old_p1.mu + delta_mu_team / 2
-        mu_pres_2 = old_p2.mu + delta_mu_team / 2
-
-        # Mu equalization (identical ratings)
-        mu_equal = new_mu_team / 2
-
-        # Converged mu (use alpha_eff)
-        final_mu_1 = (1 - alpha_eff) * mu_pres_1 + alpha_eff * mu_equal
-        final_mu_2 = (1 - alpha_eff) * mu_pres_2 + alpha_eff * mu_equal
-
-        # Var updates
+        
+        # Var deltas
         old_var_1 = old_p1.sigma ** 2
         old_var_2 = old_p2.sigma ** 2
-        var_old_sum = old_var_1 + old_var_2
         new_var_team = new_p1_temp.sigma ** 2 + new_p2_temp.sigma ** 2
-
-        if var_old_sum == 0:  # Edge case: equal split
-            var_prop_1 = new_var_team / 2
-            var_prop_2 = new_var_team / 2
+        delta_var_team = new_var_team - (old_var_1 + old_var_2)
+        
+        # --- Determine distribution modifiers ---
+        if old_p1.mu <= old_p2.mu:
+            # p1 weaker, p2 stronger
+            if delta_mu_team > 0:
+                # reward weaker more
+                mod1, mod2 = 0.5 + bias, 0.5 - bias
+            elif delta_mu_team < 0:
+                # protect weaker, punish stronger
+                mod1, mod2 = 0.5 - bias, 0.5 + bias
+            else:
+                mod1 = mod2 = 0.5
         else:
-            var_prop_1 = (old_var_1 / var_old_sum) * new_var_team
-            var_prop_2 = (old_var_2 / var_old_sum) * new_var_team
-
-        var_equal = new_var_team / 2
-
-        # Converged var (blend preserves sum; use alpha_eff)
-        final_var_1 = (1 - alpha_eff) * var_prop_1 + alpha_eff * var_equal
-        final_var_2 = (1 - alpha_eff) * var_prop_2 + alpha_eff * var_equal
-
-        # Sigmas (stable, as vars >= 0)
+            # p2 weaker, p1 stronger
+            if delta_mu_team > 0:
+                mod1, mod2 = 0.5 - bias, 0.5 + bias
+            elif delta_mu_team < 0:
+                mod1, mod2 = 0.5 + bias, 0.5 - bias
+            else:
+                mod1 = mod2 = 0.5
+        
+        # Determine var modifiers: same as mu for reductions (higher mod gets more negative),
+        # flipped for increases (higher mod gets less positive)
+        var_mod1, var_mod2 = mod1, mod2
+        if delta_var_team >= 0:
+            var_mod1, var_mod2 = 1 - mod1, 1 - mod2  # Flip to minimize added uncertainty for higher mu mod
+        
+        # --- Final mus and vars ---
+        final_mu_1 = old_p1.mu + delta_mu_team * mod1
+        final_mu_2 = old_p2.mu + delta_mu_team * mod2
+        final_var_1 = max(old_var_1 + delta_var_team * var_mod1, 0)
+        final_var_2 = max(old_var_2 + delta_var_team * var_mod2, 0)
+        
+        # Sigmas
         final_sigma_1 = math.sqrt(final_var_1)
         final_sigma_2 = math.sqrt(final_var_2)
-
+        
         # Replace with converged ratings
         new_teams[i] = [
             model.rating(mu=final_mu_1, sigma=final_sigma_1),
