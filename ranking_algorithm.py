@@ -80,10 +80,8 @@ def apply_convergence(model, teams, new_teams):
     """
     Apply convergence logic to team ratings after model.rate update.
     This function modifies new_teams in place to implement mu-based convergence
-    by unevenly distributing the team mu delta, favoring lower-rated players in positive updates 
-    and protecting them in negative ones. For sigma, similarly distribute the team variance delta
-    using the same modifiers, but flipped for positive deltas to give more uncertainty reduction 
-    (less added variance) to the player with larger mu modifier.
+    by multiplying individual mu deltas with modifiers based on initial mu gaps.
+    Variances are taken directly from OpenSkill's updates.
     Dynamic bias quadratic in initial mu diff and beta-normalized.
     """
     CONVERGENCE_STRENGTH = 0.006  # Single tunable param: higher = stronger bias on large gaps
@@ -96,59 +94,44 @@ def apply_convergence(model, teams, new_teams):
         # Compute initial mu difference for dynamic bias
         diff = abs(old_p1.mu - old_p2.mu)
         bias = CONVERGENCE_STRENGTH * (diff / model.beta) ** 2
-        bias = min(bias, 0.4)  # Cap for mu bias (<0.5 for stability)
+        bias = min(bias, 0.45)  # Cap for mu bias (<0.5 for stability)
         
-        # Compute team-level mu delta from library update
-        old_mu_team = old_p1.mu + old_p2.mu
-        new_mu_team = new_p1_temp.mu + new_p2_temp.mu
-        delta_mu_team = new_mu_team - old_mu_team
+        # Compute individual mu deltas from library update
+        delta_mu_1 = new_p1_temp.mu - old_p1.mu
+        delta_mu_2 = new_p2_temp.mu - old_p2.mu
         
-        # Var deltas
-        old_var_1 = old_p1.sigma ** 2
-        old_var_2 = old_p2.sigma ** 2
-        new_var_team = new_p1_temp.sigma ** 2 + new_p2_temp.sigma ** 2
-        delta_var_team = new_var_team - (old_var_1 + old_var_2)
-        
-        # --- Determine distribution modifiers ---
+        # --- Determine distribution modifiers (multipliers) ---
         if old_p1.mu <= old_p2.mu:
             # p1 weaker, p2 stronger
-            if delta_mu_team > 0:
-                # reward weaker more
-                mod1, mod2 = 0.5 + bias, 0.5 - bias
-            elif delta_mu_team < 0:
-                # protect weaker, punish stronger
-                mod1, mod2 = 0.5 - bias, 0.5 + bias
+            if delta_mu_1 + delta_mu_2 > 0:  # Use team delta sign for consistency
+                # reward weaker more (higher multiplier)
+                mod1, mod2 = 1.0 + bias * 2, 1.0 - bias * 2  # Adjust to sum ~2 for avg 1, but allows inflation
+            elif delta_mu_1 + delta_mu_2 < 0:
+                # protect weaker (less penalty, i.e., higher mod for negative)
+                mod1, mod2 = 1.0 - bias * 2, 1.0 + bias * 2  # Flip for losses
             else:
-                mod1 = mod2 = 0.5
+                mod1 = mod2 = 1.0
         else:
             # p2 weaker, p1 stronger
-            if delta_mu_team > 0:
-                mod1, mod2 = 0.5 - bias, 0.5 + bias
-            elif delta_mu_team < 0:
-                mod1, mod2 = 0.5 + bias, 0.5 - bias
+            if delta_mu_1 + delta_mu_2 > 0:
+                mod1, mod2 = 1.0 - bias * 2, 1.0 + bias * 2
+            elif delta_mu_1 + delta_mu_2 < 0:
+                mod1, mod2 = 1.0 + bias * 2, 1.0 - bias * 2
             else:
-                mod1 = mod2 = 0.5
+                mod1 = mod2 = 1.0
         
-        # Determine var modifiers: same as mu for reductions (higher mod gets more negative),
-        # flipped for increases (higher mod gets less positive)
-        var_mod1, var_mod2 = mod1, mod2
-        if delta_var_team >= 0:
-            var_mod1, var_mod2 = 1 - mod1, 1 - mod2  # Flip to minimize added uncertainty for higher mu mod
+        # Cap mods to prevent extremes (e.g., negative multipliers)
+        mod1 = max(0.1, min(mod1, 1.9))  # Example bounds
+        mod2 = max(0.1, min(mod2, 1.9))
         
-        # --- Final mus and vars ---
-        final_mu_1 = old_p1.mu + delta_mu_team * mod1
-        final_mu_2 = old_p2.mu + delta_mu_team * mod2
-        final_var_1 = max(old_var_1 + delta_var_team * var_mod1, 0)
-        final_var_2 = max(old_var_2 + delta_var_team * var_mod2, 0)
-        
-        # Sigmas
-        final_sigma_1 = math.sqrt(final_var_1)
-        final_sigma_2 = math.sqrt(final_var_2)
+        # --- Final mus (multiplied deltas) ---
+        final_mu_1 = old_p1.mu + delta_mu_1 * mod1
+        final_mu_2 = old_p2.mu + delta_mu_2 * mod2
         
         # Replace with converged ratings
         new_teams[i] = [
-            model.rating(mu=final_mu_1, sigma=final_sigma_1),
-            model.rating(mu=final_mu_2, sigma=final_sigma_2)
+            model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
+            model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
         ]
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
