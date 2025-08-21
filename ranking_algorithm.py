@@ -91,9 +91,14 @@ def apply_convergence(model, teams, new_teams):
         new_p1_temp = new_teams[i][0]
         new_p2_temp = new_teams[i][1]
         
-        # Compute initial mu difference for dynamic bias
-        diff = abs(old_p1.mu - old_p2.mu)
-        bias = CONVERGENCE_STRENGTH * (diff / model.beta) ** 2
+        # New: Compute differences for mu and sigma
+        diff_mu = abs(old_p1.mu - old_p2.mu)
+        diff_sigma = abs(old_p1.sigma - old_p2.sigma)
+        scaled_diff_sigma = 3 * diff_sigma  # Scale to mu-equivalent for conservative impact
+        effective_diff = max(diff_mu, scaled_diff_sigma)  # Use larger for stronger penalization
+
+        # Dynamic bias (using effective_diff)
+        bias = CONVERGENCE_STRENGTH * (effective_diff / model.beta) ** 2
         bias = min(bias, 0.45)  # Cap for mu bias (<0.5 for stability)
         
         # Compute individual mu deltas from library update
@@ -124,9 +129,24 @@ def apply_convergence(model, teams, new_teams):
         mod1 = max(0.1, min(mod1, 1.9))  # Example bounds
         mod2 = max(0.1, min(mod2, 1.9))
         
+        # New: Compute modified deltas
+        mod_delta_1 = delta_mu_1 * mod1
+        mod_delta_2 = delta_mu_2 * mod2
+
+        # New: Normalize to conserve original total team delta (prevent inflation/deflation)
+        original_total_delta = delta_mu_1 + delta_mu_2
+        mod_total = mod_delta_1 + mod_delta_2
+        if mod_total != 0:
+            scale_factor = original_total_delta / mod_total
+            final_delta_1 = mod_delta_1 * scale_factor
+            final_delta_2 = mod_delta_2 * scale_factor
+        else:
+            final_delta_1 = mod_delta_1  # Fallback if zero (rare, preserves mods)
+            final_delta_2 = mod_delta_2
+        
         # --- Final mus (multiplied deltas) ---
-        final_mu_1 = old_p1.mu + delta_mu_1 * mod1
-        final_mu_2 = old_p2.mu + delta_mu_2 * mod2
+        final_mu_1 = old_p1.mu + final_delta_1
+        final_mu_2 = old_p2.mu + final_delta_2
         
         # Replace with converged ratings
         new_teams[i] = [
