@@ -202,7 +202,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
     # Rate the teams directly
     try:
         new_teams = model.rate(teams, ranks=ranks)
-        apply_convergence(model, teams, new_teams)
+        # apply_convergence(model, teams, new_teams)
         
         # Update player_ratings
         sorted_placings = sorted(teams_by_placing.keys())
