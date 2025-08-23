@@ -81,10 +81,10 @@ def apply_convergence(model, teams, new_teams, mu_spread):
     Variances are taken directly from OpenSkill's updates.
     Dynamic bias sigmoid in blended diff for minimal change in normal cases.
     """
-    CONVERGENCE_STRENGTH = 0.5  # Tunable: higher = stronger bias on large gaps
+    CONVERGENCE_STRENGTH = 1  # Tunable: higher = stronger bias on large gaps
     BLEND_P = 0.75  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
-    MAX_DEVIATION = 0.9  # Maximum allowed deviation from 1.0 for modifiers
+    MAX_DEVIATION = 0.95  # Maximum allowed deviation from 1.0 for modifiers
     MIDPOINT = 0.4  # Tunable: sigmoid inflection point (lower=earlier ramp)
     STEEPNESS = 10  # Tunable: sigmoid sharpness (higher=faster transition)
    
