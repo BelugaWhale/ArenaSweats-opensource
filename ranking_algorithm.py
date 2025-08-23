@@ -81,12 +81,12 @@ def apply_convergence(model, teams, new_teams, mu_spread):
     Variances are taken directly from OpenSkill's updates.
     Dynamic bias sigmoid in blended diff for minimal change in normal cases.
     """
-    CONVERGENCE_STRENGTH = 0.67  # Tunable: higher = stronger bias on large gaps
-    BLEND_P = 0.75  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
+    CONVERGENCE_STRENGTH = 0.5  # Tunable: higher = stronger bias on large gaps
+    BLEND_P = 0.8  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
     MAX_DEVIATION = 0.9  # Maximum allowed deviation from 1.0 for modifiers
-    MIDPOINT = 0.3  # Tunable: sigmoid inflection point (lower=earlier ramp)
-    STEEPNESS = 20.0  # Tunable: sigmoid sharpness (higher=faster transition)
+    MIDPOINT = 0.5  # Tunable: sigmoid inflection point (lower=earlier ramp)
+    STEEPNESS = 10  # Tunable: sigmoid sharpness (higher=faster transition)
    
     for i in range(len(teams)):
         old_p1 = teams[i][0]
@@ -222,84 +222,3 @@ def process_game_ratings(model, players, game_id, player_ratings, logger, mu_spr
     except Exception as e:
         logger.error(f"Failed to update ratings for game {game_id}: {e}")
         return False, player_ratings
-def test_convergence_implementation():
-    """
-    Test function to verify the blended convergence implementation works correctly.
-    Tests normal case and boosting case scenarios.
-    """
-    print("Testing blended convergence implementation...")
-   
-    model = instantiate_rating_model()
-   
-    # Test case 1: Normal case (moderate skill gap)
-    print("\n=== Test Case 1: Normal skill gap ===")
-    teams = [[model.rating(mu=30, sigma=2), model.rating(mu=50, sigma=3)]]
-    mu_spread = 50 - 30  # 20
-    print(f"Original team: mu1={teams[0][0].mu}, sigma1={teams[0][0].sigma}, mu2={teams[0][1].mu}, sigma2={teams[0][1].sigma}")
-    print(f"mu_spread: {mu_spread}")
-   
-    # Simulate OpenSkill update (dummy)
-    new_teams = [[model.rating(mu=32, sigma=1.9), model.rating(mu=48, sigma=2.8)]]
-    original_deltas = (32-30, 48-50)
-    original_total = sum(original_deltas)
-    print(f"Simulated deltas before convergence: {original_deltas}, total: {original_total}")
-   
-    apply_convergence(model, teams, new_teams, mu_spread)
-    final_deltas = (new_teams[0][0].mu - 30, new_teams[0][1].mu - 50)
-    final_total = sum(final_deltas)
-    print(f"Final deltas after convergence: {final_deltas}, total: {final_total}")
-    print(f"Total delta preserved: {abs(final_total - original_total) < 0.001}")
-   
-    # Test case 2: Boosting case (extreme skill gap)
-    print("\n=== Test Case 2: Boosting scenario ===")
-    teams = [[model.rating(mu=20, sigma=8), model.rating(mu=120, sigma=2)]]
-    mu_spread = 120 - 20  # 100
-    print(f"Original team: mu1={teams[0][0].mu}, sigma1={teams[0][0].sigma}, mu2={teams[0][1].mu}, sigma2={teams[0][1].sigma}")
-    print(f"mu_spread: {mu_spread}")
-   
-    # Simulate OpenSkill update (dummy)
-    new_teams = [[model.rating(mu=22, sigma=7.5), model.rating(mu=118, sigma=1.9)]]
-    original_deltas = (22-20, 118-120)
-    original_total = sum(original_deltas)
-    print(f"Simulated deltas before convergence: {original_deltas}, total: {original_total}")
-   
-    apply_convergence(model, teams, new_teams, mu_spread)
-    final_deltas = (new_teams[0][0].mu - 20, new_teams[0][1].mu - 120)
-    final_total = sum(final_deltas)
-    print(f"Final deltas after convergence: {final_deltas}, total: {final_total}")
-    print(f"Total delta preserved: {abs(final_total - original_total) < 0.001}")
-   
-    print("\nTest completed successfully!")
-def test_sigmoid_bias():
-    """Test the sigmoid bias function with different blended_diff values"""
-    print("\n=== Testing Sigmoid Bias Function ===")
-   
-    def calculate_bias(blended_diff, strength=0.67, midpoint=0.3, steepness=20.0, max_dev=0.9):
-        sigmoid_val = 1 / (1 + math.exp(-steepness * (blended_diff - midpoint)))
-        bias = strength * sigmoid_val
-        return min(bias, max_dev)
-   
-    test_cases = [
-        (0.0, "Zero diff (no change)"),
-        (0.2, "Normal low diff"),
-        (0.5, "Midpoint diff"),
-        (0.8, "High normal diff"),
-        (1.0, "High diff"),
-        (1.2, "Boosting scenario"),
-        (1.5, "Extreme boosting"),
-        (2.0, "Very extreme")
-    ]
-   
-    print("blended_diff -> sigmoid -> bias")
-    for diff, description in test_cases:
-        sigmoid_val = 1 / (1 + math.exp(-20.0 * (diff - 0.3)))
-        bias = min(0.67 * sigmoid_val, 0.9)
-        print(f"{diff:4.1f} ({description:20s}) -> {sigmoid_val:.4f} -> {bias:.4f}")
-   
-    print("\nExpected behavior:")
-    print("- Low diffs (0.0-0.3): Very small bias (~0.001-0.05)")
-    print("- Mid diffs (0.4-0.6): Moderate bias (~0.1-0.2)")  
-    print("- High diffs (0.8+): Strong bias (~0.25-0.33)")
-if __name__ == "__main__":
-    test_convergence_implementation()
-    test_sigmoid_bias()
