@@ -73,7 +73,6 @@ def instantiate_rating_model():
     """
     # This instantiation creates a model for games with strict rankings (no draws).
     return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
-
 def apply_convergence(model, teams, new_teams, mu_spread):
     """
     Apply convergence logic to team ratings after model.rate update.
@@ -82,13 +81,12 @@ def apply_convergence(model, teams, new_teams, mu_spread):
     Variances are taken directly from OpenSkill's updates.
     Dynamic bias sigmoid in blended diff for minimal change in normal cases.
     """
-    CONVERGENCE_STRENGTH = 2.5  # Tunable: higher = stronger bias on large gaps
+    CONVERGENCE_STRENGTH = 1  # Tunable: higher = stronger bias on large gaps
     BLEND_P = 0.75  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
-    MAX_DEVIATION = 3  # Maximum allowed deviation from 1.0 for modifiers
+    MAX_DEVIATION = 0.95  # Maximum allowed deviation from 1.0 for modifiers
     MIDPOINT = 0.4  # Tunable: sigmoid inflection point (lower=earlier ramp)
     STEEPNESS = 10  # Tunable: sigmoid sharpness (higher=faster transition)
-    SKIP_THRESHOLD = 0.45 # Tunable: Convergence skipped when bias is below this.
    
     for i in range(len(teams)):
         old_p1 = teams[i][0]
@@ -106,7 +104,6 @@ def apply_convergence(model, teams, new_teams, mu_spread):
         # Dynamic bias (sigmoid, no /beta)
         sigmoid_val = 1 / (1 + math.exp(-STEEPNESS * (blended_diff - MIDPOINT)))
         bias = CONVERGENCE_STRENGTH * sigmoid_val
-        if bias < SKIP_THRESHOLD: continue
         bias = min(bias, MAX_DEVIATION)  # Cap to prevent extreme modifiers
        
         # Compute individual mu deltas from library update
@@ -162,7 +159,6 @@ def apply_convergence(model, teams, new_teams, mu_spread):
             model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
             model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
         ]
-
 def process_game_ratings(model, players, game_id, player_ratings, logger, mu_spread):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
