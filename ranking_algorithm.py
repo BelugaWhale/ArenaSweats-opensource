@@ -118,7 +118,8 @@ def penalize_boosting(model, teams, new_teams, logger):
         
         # New bias logic: separate thresholds with linear scaling for mu
         MU_THRESHOLD = 0.6
-        SIGMA_THRESHOLD = 0.75
+        SIGMA_THRESHOLD = 0.5
+        SIGMA_PENALTY = 0.75
         MU_SCALE_START = 0.6
         MU_SCALE_END = 0.8
         BIAS_MIN = 0.5
@@ -127,7 +128,7 @@ def penalize_boosting(model, teams, new_teams, logger):
         if diff_mu < MU_THRESHOLD and diff_sigma < SIGMA_THRESHOLD:
             continue  # Do nothing for this team
         elif diff_mu < MU_THRESHOLD:  # diff_sigma >= SIGMA_THRESHOLD, apply fixed sigma bias
-            bias = BIAS_MIN  # 0.5
+            bias = SIGMA_PENALTY  # 0.75
         else:  # diff_mu >= MU_THRESHOLD, apply scaled mu bias (ignores sigma)
             fraction = min(1.0, (diff_mu - MU_SCALE_START) / (MU_SCALE_END - MU_SCALE_START))
             bias = BIAS_MIN + fraction * (BIAS_MAX - BIAS_MIN)
@@ -153,19 +154,6 @@ def penalize_boosting(model, teams, new_teams, logger):
             model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
             model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
         ]
-        
-        # Logging for high bias
-        if bias >= 0.6:
-            if p1_weaker:
-                weaker_mu_log, weaker_sigma = old_p1.mu, old_p1.sigma
-                stronger_mu_before, stronger_sigma_before = old_p2.mu, old_p2.sigma
-                stronger_mu_after, stronger_sigma_after = final_mu_2, new_p2_temp.sigma
-            else:
-                weaker_mu_log, weaker_sigma = old_p2.mu, old_p2.sigma
-                stronger_mu_before, stronger_sigma_before = old_p1.mu, old_p1.sigma
-                stronger_mu_after, stronger_sigma_after = final_mu_1, new_p1_temp.sigma
-            logger.info(f"Weaker: ({weaker_mu_log:.2f}, {weaker_sigma:.2f}), Stronger: ({stronger_mu_before:.2f}, {stronger_sigma_before:.2f}), Bias: {bias:.3f}, Stronger after: ({stronger_mu_after:.2f}, {stronger_sigma_after:.2f})")
-
 
 def process_game_ratings(model, players, game_id, player_ratings, logger, game_date):
     """
