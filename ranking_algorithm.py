@@ -118,7 +118,7 @@ def penalize_boosting(model, teams, new_teams, logger):
         
         # New bias logic: separate thresholds with linear scaling for mu
         MU_THRESHOLD = 0.6
-        SIGMA_THRESHOLD = 0.5
+        SIGMA_THRESHOLD = 0.75
         MU_SCALE_START = 0.6
         MU_SCALE_END = 0.8
         BIAS_MIN = 0.5
