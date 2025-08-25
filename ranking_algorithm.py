@@ -1,11 +1,11 @@
 import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Constants
 RANK_SPLIT = "2025 Split 2"
-SPLIT_START_DATE = datetime(2025, 6, 25)
+SPLIT_START_DATE = datetime(2025, 6, 25, tzinfo=timezone.utc)
 
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
@@ -183,6 +183,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger, game_d
     Returns:
         tuple: (success: bool, updated_player_ratings: dict)
     """
+    
     # Verify exactly 16 players
     if len(players) != 16:
         logger.warning(f"Game {game_id} has {len(players)} players, expected 16")
