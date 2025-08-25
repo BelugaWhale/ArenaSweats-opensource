@@ -1,6 +1,10 @@
 import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
+
+# Module-level variables for persistent dynamic mu bounds (initialized once)
+current_min_mu = -20.0
+current_max_mu = 60.0
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -73,93 +77,110 @@ def instantiate_rating_model():
     """
     # This instantiation creates a model for games with strict rankings (no draws).
     return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
-def apply_convergence(model, teams, new_teams, mu_spread):
+
+def apply_convergence(model, teams, new_teams):
     """
     Apply convergence logic to team ratings after model.rate update.
     This function modifies new_teams in place to implement blended mu/sigma convergence
     by multiplying individual mu deltas with modifiers based on blended diffs.
     Variances are taken directly from OpenSkill's updates.
     Dynamic bias sigmoid in blended diff for minimal change in normal cases.
+    Now handles bounds checking using old mus and computes mu_spread internally.
     """
+    global current_min_mu, current_max_mu
+    
+    # Pre-loop: Check all old mus (16 values) and expand bounds if needed
+    for team in teams:
+        old_p1_mu = team[0].mu
+        old_p2_mu = team[1].mu
+        if old_p1_mu < current_min_mu:
+            current_min_mu = old_p1_mu
+        if old_p1_mu > current_max_mu:
+            current_max_mu = old_p1_mu
+        if old_p2_mu < current_min_mu:
+            current_min_mu = old_p2_mu
+        if old_p2_mu > current_max_mu:
+            current_max_mu = old_p2_mu
+    
+    # Compute mu_spread after potential bound updates
+    mu_spread = current_max_mu - current_min_mu
     CONVERGENCE_STRENGTH = 1  # Tunable: higher = stronger bias on large gaps
     BLEND_P = 0.75  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
     MAX_DEVIATION = 0.95  # Maximum allowed deviation from 1.0 for modifiers
     MIDPOINT = 0.4  # Tunable: sigmoid inflection point (lower=earlier ramp)
     STEEPNESS = 10  # Tunable: sigmoid sharpness (higher=faster transition)
-   
+    SKIP_THRESHOLD = 0.2 # Tunable: Convergence skipped when bias is below this.
+    
     for i in range(len(teams)):
         old_p1 = teams[i][0]
         old_p2 = teams[i][1]
         new_p1_temp = new_teams[i][0]
         new_p2_temp = new_teams[i][1]
-       
+        
         # Compute normalized differences
         diff_mu = abs(old_p1.mu - old_p2.mu) / mu_spread if mu_spread > 0 else 0.0
         diff_sigma = abs(old_p1.sigma - old_p2.sigma) / SIGMA_SPREAD if SIGMA_SPREAD > 0 else 0.0
-       
+        
         # Blended diff
         blended_diff = BLEND_P * diff_mu + (1 - BLEND_P) * diff_sigma
-       
+        
         # Dynamic bias (sigmoid, no /beta)
         sigmoid_val = 1 / (1 + math.exp(-STEEPNESS * (blended_diff - MIDPOINT)))
         bias = CONVERGENCE_STRENGTH * sigmoid_val
+        if bias < SKIP_THRESHOLD: continue
         bias = min(bias, MAX_DEVIATION)  # Cap to prevent extreme modifiers
-       
+        
         # Compute individual mu deltas from library update
         delta_mu_1 = new_p1_temp.mu - old_p1.mu
         delta_mu_2 = new_p2_temp.mu - old_p2.mu
-       
-        # --- Determine distribution modifiers (multipliers) ---
-        # Identify weaker and stronger players
-        p1_weaker = old_p1.mu <= old_p2.mu
         team_delta = delta_mu_1 + delta_mu_2
-       
-        if team_delta > 0 or team_delta < 0:
-            # Calculate modifiers for weaker and stronger players
-            if team_delta > 0:
-                # Reward weaker player more, stronger player less
-                mod_weaker = 1.0 + bias
-                mod_stronger = 1.0 - bias
-            else:  # team_delta < 0
-                # Protect weaker player (less penalty), penalize stronger player more
-                mod_weaker = 1.0 - bias
-                mod_stronger = 1.0 + bias
-           
-            # Assign modifiers based on who is weaker
+        
+        if team_delta == 0:
+            final_mu_1 = old_p1.mu + delta_mu_1
+            final_mu_2 = old_p2.mu + delta_mu_2
+        else:
+            # Normalize to contributions (percentages)
+            contrib_1 = delta_mu_1 / team_delta
+            contrib_2 = delta_mu_2 / team_delta            
+            
+            # Identify weaker/stronger
+            p1_weaker = old_p1.mu <= old_p2.mu
             if p1_weaker:
-                mod_p1, mod_p2 = mod_weaker, mod_stronger
+                contrib_weak = contrib_1
+                contrib_strong = contrib_2
             else:
-                mod_p1, mod_p2 = mod_stronger, mod_weaker
-        else:
-            # No rating change (delta is zero)
-            mod_p1 = mod_p2 = 1.0
-       
-        # Compute modified deltas
-        mod_delta_1 = delta_mu_1 * mod_p1
-        mod_delta_2 = delta_mu_2 * mod_p2
-       
-        # Normalize to conserve original total team delta (prevent inflation/deflation)
-        original_total_delta = delta_mu_1 + delta_mu_2
-        mod_total = mod_delta_1 + mod_delta_2
-        if mod_total != 0:
-            scale_factor = original_total_delta / mod_total
-            final_delta_1 = mod_delta_1 * scale_factor
-            final_delta_2 = mod_delta_2 * scale_factor
-        else:
-            final_delta_1 = mod_delta_1  # Fallback if zero (rare, preserves mods)
-            final_delta_2 = mod_delta_2
-       
-        # --- Final mus (multiplied deltas) ---
-        final_mu_1 = old_p1.mu + final_delta_1
-        final_mu_2 = old_p2.mu + final_delta_2
-       
+                contrib_weak = contrib_2
+                contrib_strong = contrib_1
+            
+            # Adjust contributions with bias (sum remains 1)
+            if team_delta > 0:  # Win: Favor weaker
+                shift = bias * abs(contrib_strong)
+                mod_contrib_weak = contrib_weak + shift
+                mod_contrib_strong = contrib_strong - shift
+            else:  # Loss: Favor stronger (protect weaker by penalizing strong more)
+                shift = bias * abs(contrib_weak)
+                mod_contrib_weak = contrib_weak - shift
+                mod_contrib_strong = contrib_strong + shift
+            
+            # Scale back to deltas
+            if p1_weaker:
+                final_delta_1 = mod_contrib_weak * team_delta
+                final_delta_2 = mod_contrib_strong * team_delta
+            else:
+                final_delta_1 = mod_contrib_strong * team_delta
+                final_delta_2 = mod_contrib_weak * team_delta
+            
+            final_mu_1 = old_p1.mu + final_delta_1
+            final_mu_2 = old_p2.mu + final_delta_2
+        
         # Replace with converged ratings (sigmas unchanged from temp)
         new_teams[i] = [
             model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
             model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
         ]
-def process_game_ratings(model, players, game_id, player_ratings, logger, mu_spread):
+
+def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
     Assumes exactly 8 teams of 2 players each (16 players total).
@@ -207,7 +228,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger, mu_spr
     # Rate the teams directly
     try:
         new_teams = model.rate(teams, ranks=ranks)
-        apply_convergence(model, teams, new_teams, mu_spread)
+        apply_convergence(model, teams, new_teams)
        
         # Update player_ratings
         sorted_placings = sorted(teams_by_placing.keys())
@@ -216,7 +237,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger, mu_spr
             new_team = new_teams[i]
             player_ratings[team_players[0]] = new_team[0]
             player_ratings[team_players[1]] = new_team[1]
-       
+        
         return True, player_ratings
    
     except Exception as e:
