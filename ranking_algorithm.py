@@ -89,19 +89,6 @@ def apply_convergence(model, teams, new_teams):
     """
     global current_min_mu, current_max_mu
     
-    # Pre-loop: Check all old mus (16 values) and expand bounds if needed
-    for team in teams:
-        old_p1_mu = team[0].mu
-        old_p2_mu = team[1].mu
-        if old_p1_mu < current_min_mu:
-            current_min_mu = old_p1_mu
-        if old_p1_mu > current_max_mu:
-            current_max_mu = old_p1_mu
-        if old_p2_mu < current_min_mu:
-            current_min_mu = old_p2_mu
-        if old_p2_mu > current_max_mu:
-            current_max_mu = old_p2_mu
-    
     # Compute mu_spread after potential bound updates
     mu_spread = current_max_mu - current_min_mu
     CONVERGENCE_STRENGTH = 1  # Tunable: higher = stronger bias on large gaps
@@ -117,6 +104,15 @@ def apply_convergence(model, teams, new_teams):
         old_p2 = teams[i][1]
         new_p1_temp = new_teams[i][0]
         new_p2_temp = new_teams[i][1]
+        
+        if old_p1.mu < current_min_mu:
+            current_min_mu = old_p1.mu
+        if old_p1.mu > current_max_mu:
+            current_max_mu = old_p1.mu
+        if old_p2.mu < current_min_mu:
+            current_min_mu = old_p2.mu
+        if old_p2.mu > current_max_mu:
+            current_max_mu = old_p2.mu
         
         # Compute normalized differences
         diff_mu = abs(old_p1.mu - old_p2.mu) / mu_spread if mu_spread > 0 else 0.0
@@ -134,45 +130,21 @@ def apply_convergence(model, teams, new_teams):
         # Compute individual mu deltas from library update
         delta_mu_1 = new_p1_temp.mu - old_p1.mu
         delta_mu_2 = new_p2_temp.mu - old_p2.mu
-        team_delta = delta_mu_1 + delta_mu_2
         
-        if team_delta == 0:
-            final_mu_1 = old_p1.mu + delta_mu_1
-            final_mu_2 = old_p2.mu + delta_mu_2
-        else:
-            # Normalize to contributions (percentages)
-            contrib_1 = delta_mu_1 / team_delta
-            contrib_2 = delta_mu_2 / team_delta            
-            
-            # Identify weaker/stronger
-            p1_weaker = old_p1.mu <= old_p2.mu
-            if p1_weaker:
-                contrib_weak = contrib_1
-                contrib_strong = contrib_2
-            else:
-                contrib_weak = contrib_2
-                contrib_strong = contrib_1
-            
-            # Adjust contributions with bias (sum remains 1)
-            if team_delta > 0:  # Win: Favor weaker
-                shift = bias * abs(contrib_strong)
-                mod_contrib_weak = contrib_weak + shift
-                mod_contrib_strong = contrib_strong - shift
-            else:  # Loss: Favor stronger (protect weaker by penalizing strong more)
-                shift = bias * abs(contrib_weak)
-                mod_contrib_weak = contrib_weak - shift
-                mod_contrib_strong = contrib_strong + shift
-            
-            # Scale back to deltas
-            if p1_weaker:
-                final_delta_1 = mod_contrib_weak * team_delta
-                final_delta_2 = mod_contrib_strong * team_delta
-            else:
-                final_delta_1 = mod_contrib_strong * team_delta
-                final_delta_2 = mod_contrib_weak * team_delta
-            
-            final_mu_1 = old_p1.mu + final_delta_1
+        # Identify weaker/stronger
+        p1_weaker = old_p1.mu <= old_p2.mu
+        if p1_weaker:
+            # Weaker unchanged
+            final_mu_1 = new_p1_temp.mu
+            # Adjust stronger
+            final_delta_2 = delta_mu_2 - bias * abs(delta_mu_2)
             final_mu_2 = old_p2.mu + final_delta_2
+        else:
+            # Weaker unchanged
+            final_mu_2 = new_p2_temp.mu
+            # Adjust stronger
+            final_delta_1 = delta_mu_1 - bias * abs(delta_mu_1)
+            final_mu_1 = old_p1.mu + final_delta_1
         
         # Replace with converged ratings (sigmas unchanged from temp)
         new_teams[i] = [
