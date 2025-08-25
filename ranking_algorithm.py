@@ -1,10 +1,12 @@
 import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
+from datetime import datetime
 
-# Module-level variables for persistent dynamic mu bounds (initialized once)
-current_min_mu = -20.0
-current_max_mu = 60.0
+# Constants
+RANK_SPLIT = "2025 Split 2"
+SPLIT_START_DATE = datetime(2025, 6, 25)
+
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -78,26 +80,15 @@ def instantiate_rating_model():
     # This instantiation creates a model for games with strict rankings (no draws).
     return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
 
-def apply_convergence(model, teams, new_teams):
+def penalize_boosting(model, teams, new_teams, logger):
     """
-    Apply convergence logic to team ratings after model.rate update.
-    This function modifies new_teams in place to implement blended mu/sigma convergence
-    by multiplying individual mu deltas with modifiers based on blended diffs.
-    Variances are taken directly from OpenSkill's updates.
-    Dynamic bias sigmoid in blended diff for minimal change in normal cases.
-    Now handles bounds checking using old mus and computes mu_spread internally.
+    Penalize boosting in team ratings after model.rate update.
+    This function modifies new_teams in place to adjust mu updates for the stronger player in each team
+    when there is a significant skill gap, reducing unnatural inflation from mismatched teams.
+    Computes diff_mu as a normalized ratio in [0,1] based on mu gap (ignoring tiny gaps via MIN_MU_DIFF). Computes diff_sigma as normalized sigma gap. Applies bias only to stronger player's mu update: fixed 0.5 if diff_sigma >=0.5 and diff_mu <0.6; scaled from 0.5 to 0.95 linearly between diff_mu=0.6 and 0.8 (capped at 0.95) if diff_mu >=0.6; nothing otherwise. Sigmas unchanged from OpenSkill.
     """
-    global current_min_mu, current_max_mu
-    
-    # Compute mu_spread after potential bound updates
-    mu_spread = current_max_mu - current_min_mu
-    CONVERGENCE_STRENGTH = 2  # Tunable: higher = stronger bias on large gaps
-    BLEND_P = 0.75  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
-    MAX_DEVIATION = 0.95  # Maximum allowed deviation from 1.0 for modifiers
-    MIDPOINT = 0.4  # Tunable: sigmoid inflection point (lower=earlier ramp)
-    STEEPNESS = 10  # Tunable: sigmoid sharpness (higher=faster transition)
-    SKIP_THRESHOLD = 0.3 # Tunable: Convergence skipped when bias is below this.
+    MIN_MU_DIFF = 30  # Tunable: Minimum absolute mu difference to apply non-zero diff_mu
     
     for i in range(len(teams)):
         old_p1 = teams[i][0]
@@ -105,34 +96,45 @@ def apply_convergence(model, teams, new_teams):
         new_p1_temp = new_teams[i][0]
         new_p2_temp = new_teams[i][1]
         
-        if old_p1.mu < current_min_mu:
-            current_min_mu = old_p1.mu
-        if old_p1.mu > current_max_mu:
-            current_max_mu = old_p1.mu
-        if old_p2.mu < current_min_mu:
-            current_min_mu = old_p2.mu
-        if old_p2.mu > current_max_mu:
-            current_max_mu = old_p2.mu
+        # Identify weaker and stronger
+        p1_weaker = old_p1.mu <= old_p2.mu
+        if p1_weaker:
+            weaker_mu = old_p1.mu
+            stronger_mu = old_p2.mu
+        else:
+            weaker_mu = old_p2.mu
+            stronger_mu = old_p1.mu
         
-        # Compute normalized differences
-        diff_mu = abs(old_p1.mu - old_p2.mu) / mu_spread if mu_spread > 0 else 0.0
+        # Compute diff_mu with ratio-based formula
+        abs_mu_diff = abs(weaker_mu - stronger_mu)
+        if abs_mu_diff < MIN_MU_DIFF:
+            diff_mu = 0.0
+        else:
+            diff_mu = 1 - abs(weaker_mu) / abs_mu_diff
+            diff_mu = min(1.0, max(0.0, diff_mu))  # Normalize to [0,1] for consistent blending
+        
+        # Compute diff_sigma
         diff_sigma = abs(old_p1.sigma - old_p2.sigma) / SIGMA_SPREAD if SIGMA_SPREAD > 0 else 0.0
         
-        # Blended diff
-        blended_diff = BLEND_P * diff_mu + (1 - BLEND_P) * diff_sigma
+        # New bias logic: separate thresholds with linear scaling for mu
+        MU_THRESHOLD = 0.6
+        SIGMA_THRESHOLD = 0.5
+        MU_SCALE_START = 0.6
+        MU_SCALE_END = 0.8
+        BIAS_MIN = 0.5
+        BIAS_MAX = 0.95
         
-        # Dynamic bias (sigmoid, no /beta)
-        sigmoid_val = 1 / (1 + math.exp(-STEEPNESS * (blended_diff - MIDPOINT)))
-        bias = CONVERGENCE_STRENGTH * sigmoid_val
-        if bias < SKIP_THRESHOLD: continue
-        bias = min(bias, MAX_DEVIATION)  # Cap to prevent extreme modifiers
+        if diff_mu < MU_THRESHOLD and diff_sigma < SIGMA_THRESHOLD:
+            continue  # Do nothing for this team
+        elif diff_mu < MU_THRESHOLD:  # diff_sigma >= SIGMA_THRESHOLD, apply fixed sigma bias
+            bias = BIAS_MIN  # 0.5
+        else:  # diff_mu >= MU_THRESHOLD, apply scaled mu bias (ignores sigma)
+            fraction = min(1.0, (diff_mu - MU_SCALE_START) / (MU_SCALE_END - MU_SCALE_START))
+            bias = BIAS_MIN + fraction * (BIAS_MAX - BIAS_MIN)
         
-        # Compute individual mu deltas from library update
+        # Compute deltas and apply bias
         delta_mu_1 = new_p1_temp.mu - old_p1.mu
         delta_mu_2 = new_p2_temp.mu - old_p2.mu
-        
-        # Identify weaker/stronger
-        p1_weaker = old_p1.mu <= old_p2.mu
         if p1_weaker:
             # Weaker unchanged
             final_mu_1 = new_p1_temp.mu
@@ -146,26 +148,26 @@ def apply_convergence(model, teams, new_teams):
             final_delta_1 = delta_mu_1 - bias * abs(delta_mu_1)
             final_mu_1 = old_p1.mu + final_delta_1
         
-        # Replace with converged ratings (sigmas unchanged from temp)
+        # Replace with new ratings
         new_teams[i] = [
             model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
             model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
         ]
         
-        # Debug statement for high bias cases
+        # Logging for high bias
         if bias >= 0.6:
             if p1_weaker:
-                weaker_mu, weaker_sigma = old_p1.mu, old_p1.sigma
+                weaker_mu_log, weaker_sigma = old_p1.mu, old_p1.sigma
                 stronger_mu_before, stronger_sigma_before = old_p2.mu, old_p2.sigma
                 stronger_mu_after, stronger_sigma_after = final_mu_2, new_p2_temp.sigma
             else:
-                weaker_mu, weaker_sigma = old_p2.mu, old_p2.sigma
+                weaker_mu_log, weaker_sigma = old_p2.mu, old_p2.sigma
                 stronger_mu_before, stronger_sigma_before = old_p1.mu, old_p1.sigma
                 stronger_mu_after, stronger_sigma_after = final_mu_1, new_p1_temp.sigma
-            
-            print(f"Weaker: ({weaker_mu:.2f}, {weaker_sigma:.2f}), Stronger: ({stronger_mu_before:.2f}, {stronger_sigma_before:.2f}), Bias: {bias:.3f}, Stronger after: ({stronger_mu_after:.2f}, {stronger_sigma_after:.2f})")
+            logger.info(f"Weaker: ({weaker_mu_log:.2f}, {weaker_sigma:.2f}), Stronger: ({stronger_mu_before:.2f}, {stronger_sigma_before:.2f}), Bias: {bias:.3f}, Stronger after: ({stronger_mu_after:.2f}, {stronger_sigma_after:.2f})")
 
-def process_game_ratings(model, players, game_id, player_ratings, logger):
+
+def process_game_ratings(model, players, game_id, player_ratings, logger, game_date):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
     Assumes exactly 8 teams of 2 players each (16 players total).
@@ -176,6 +178,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
         game_id: Game identifier for logging
         player_ratings: Dictionary of player_id -> Rating
         logger: Logger instance
+        game_date: datetime object representing when the game was played
    
     Returns:
         tuple: (success: bool, updated_player_ratings: dict)
@@ -213,7 +216,11 @@ def process_game_ratings(model, players, game_id, player_ratings, logger):
     # Rate the teams directly
     try:
         new_teams = model.rate(teams, ranks=ranks)
-        apply_convergence(model, teams, new_teams)
+        
+        # Skip penalize_boosting if game is within 5 days of split start
+        days_since_split_start = (game_date - SPLIT_START_DATE).days
+        if days_since_split_start >= 5:
+            penalize_boosting(model, teams, new_teams, logger)
        
         # Update player_ratings
         sorted_placings = sorted(teams_by_placing.keys())
