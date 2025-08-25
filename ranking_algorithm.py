@@ -91,13 +91,13 @@ def apply_convergence(model, teams, new_teams):
     
     # Compute mu_spread after potential bound updates
     mu_spread = current_max_mu - current_min_mu
-    CONVERGENCE_STRENGTH = 1  # Tunable: higher = stronger bias on large gaps
+    CONVERGENCE_STRENGTH = 2  # Tunable: higher = stronger bias on large gaps
     BLEND_P = 0.75  # Tunable: weight for mu_diff (0-1), remainder for sigma_diff
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
     MAX_DEVIATION = 0.95  # Maximum allowed deviation from 1.0 for modifiers
     MIDPOINT = 0.4  # Tunable: sigmoid inflection point (lower=earlier ramp)
     STEEPNESS = 10  # Tunable: sigmoid sharpness (higher=faster transition)
-    SKIP_THRESHOLD = 0.2 # Tunable: Convergence skipped when bias is below this.
+    SKIP_THRESHOLD = 0.3 # Tunable: Convergence skipped when bias is below this.
     
     for i in range(len(teams)):
         old_p1 = teams[i][0]
@@ -151,6 +151,19 @@ def apply_convergence(model, teams, new_teams):
             model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
             model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
         ]
+        
+        # Debug statement for high bias cases
+        if bias >= 0.6:
+            if p1_weaker:
+                weaker_mu, weaker_sigma = old_p1.mu, old_p1.sigma
+                stronger_mu_before, stronger_sigma_before = old_p2.mu, old_p2.sigma
+                stronger_mu_after, stronger_sigma_after = final_mu_2, new_p2_temp.sigma
+            else:
+                weaker_mu, weaker_sigma = old_p2.mu, old_p2.sigma
+                stronger_mu_before, stronger_sigma_before = old_p1.mu, old_p1.sigma
+                stronger_mu_after, stronger_sigma_after = final_mu_1, new_p1_temp.sigma
+            
+            print(f"Weaker: ({weaker_mu:.2f}, {weaker_sigma:.2f}), Stronger: ({stronger_mu_before:.2f}, {stronger_sigma_before:.2f}), Bias: {bias:.3f}, Stronger after: ({stronger_mu_after:.2f}, {stronger_sigma_after:.2f})")
 
 def process_game_ratings(model, players, game_id, player_ratings, logger):
     """
