@@ -4,8 +4,8 @@ from openskill.models import ThurstoneMostellerFull
 from datetime import datetime, timezone
 
 # Constants
-RANK_SPLIT = "2025 Split 2"
-SPLIT_START_DATE = datetime(2025, 6, 25, tzinfo=timezone.utc)
+RANK_SPLIT = "2025 Split 3"
+SPLIT_START_DATE = datetime(2025, 8, 27, tzinfo=timezone.utc)
 
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
@@ -35,6 +35,7 @@ def calculate_rating(rating, games_played):
     """
     scaling_factor = 0.5 + min(games_played, 40) / 40 * 0.5
     return round(base_rating * scaling_factor)
+
 def instantiate_rating_model():
     """
     Creates and returns a ThurstoneMostellerFull model from OpenSkill.
@@ -119,10 +120,10 @@ def penalize_boosting(model, teams, new_teams, logger):
         # New bias logic: separate thresholds with linear scaling for mu
         MU_THRESHOLD = 0.6
         SIGMA_THRESHOLD = 0.5
-        SIGMA_PENALTY = 0.75
+        SIGMA_PENALTY = 0.8
         MU_SCALE_START = 0.6
         MU_SCALE_END = 0.8
-        BIAS_MIN = 0.5
+        BIAS_MIN = 0.75
         BIAS_MAX = 0.95
         
         if diff_mu < MU_THRESHOLD and diff_sigma < SIGMA_THRESHOLD:
@@ -140,13 +141,13 @@ def penalize_boosting(model, teams, new_teams, logger):
             # Weaker unchanged
             final_mu_1 = new_p1_temp.mu
             # Adjust stronger
-            final_delta_2 = delta_mu_2 - bias * abs(delta_mu_2)
+            final_delta_2 = delta_mu_2 * (1 - bias)
             final_mu_2 = old_p2.mu + final_delta_2
         else:
             # Weaker unchanged
             final_mu_2 = new_p2_temp.mu
             # Adjust stronger
-            final_delta_1 = delta_mu_1 - bias * abs(delta_mu_1)
+            final_delta_1 = delta_mu_1 * (1 - bias)
             final_mu_1 = old_p1.mu + final_delta_1
         
         # Replace with new ratings
