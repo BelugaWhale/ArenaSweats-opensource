@@ -21,6 +21,7 @@ REFERENCES:
 - https://pypi.org/project/openskill/
 - https://github.com/OpenDebates/openskill.py (Note: This is a fork; original is at https://github.com/vivekjoshy/openskill.py)
 '''
+
 def calculate_rating(rating, games_played):
     """Calculate the final rating from mu, sigma and games played"""
     """
@@ -29,9 +30,9 @@ def calculate_rating(rating, games_played):
     """
     base_rating = (rating.mu - 3 * rating.sigma) * 75
     """
-    MODIFICATION 1/1 to the algorithm. (THE LOW GAMES CLAMP)
-    "A player's sigma is highest when they are new to the system."
-    Practically this has lead to a few players having not many games played and a very high skill estimate. To resolve this a scaling factor has been applied. The player's skill estimate is 50% of the rating at 0 games played, and 100% of the rating at 40 games played. This scales linearly.
+    MODIFICATION to the algorithm. (THE RAMP UP)
+    Concerns were raised about players at the top of the leaderboard with low games played. Players have also been shown to fluctuate in mu a lot while their sigma is high. A player's sigma is highest when they are new to the system.
+    Practically this has lead to a few players having not many games played and a very high skill estimate. To resolve this a scaling factor has been applied. The player's skill estimate ramps up, starting at 50% of the rating at 0 games played, and 100% of the rating at 40 games played. This scales linearly.
     """
     scaling_factor = 0.5 + min(games_played, 40) / 40 * 0.5
     return round(base_rating * scaling_factor)
@@ -39,54 +40,76 @@ def calculate_rating(rating, games_played):
 def instantiate_rating_model():
     """
     Creates and returns a ThurstoneMostellerFull model from OpenSkill.
+
     The ThurstoneMostellerFull class constructor can be customized with several
     parameters that define the behavior of the rating system. These parameters
     are based on the mathematical model of the algorithm.
+
     Parameters:
-    mu (float): The initial mean of a player's skill (μ). This represents the
-        assumed skill level of a new player before any matches have been played.
-        The default value is 25.0.
-    sigma (float): The initial standard deviation of a player's skill (σ).
-        This represents the system's uncertainty about the player's initial
-        skill. A higher value means the system is less certain. As a player
-        plays more games, their sigma will decrease. The default is 25.0 / 3.0.
-    beta (float): The "skill variance" that defines the distance in skill points
-        that gives a player an 80% chance of winning against another. A smaller
-        beta means that a smaller skill difference has a greater impact on the
-        win probability, making the system more sensitive to skill gaps.
-        The default is 25.0 / 6.0.
-    kappa (float): The "dynamic factor" added to the variance before each match
-        to account for performance variability. Similar to tau in TrueSkill.
-        The default value is 0.0001.
-    gamma (callable): Custom function you can pass that must contain parameters
-        for rank, num_teams, mu, sigma, team, player_index, and optionally scores.
-        The function must return a float or int. It represents the amount added to
-        the winning team's sigma before updating. Represented by: γ. The default
-        is the internal _gamma function.
-    epsilon (float): Arbitrary small positive real number that is used to prevent the
-        variance of the posterior distribution from becoming too small or negative. It
-        can also be thought of as a regularization parameter. Represented by: κ. The default value is 0.0001.
-    margin (float): The margin of victory needed for a win to be considered impressive.
-        This parameter is useful in games where the difference in scores matters, adjusting
-        how much a close win or loss affects the rating update. The default is 0.0.
-    balance (bool): Boolean that determines whether to emphasize rating outliers during
-        the update process, potentially affecting how extreme ratings are handled. The default is False.
-   
+        mu (float): The initial mean of a player's skill (μ). This represents the
+            assumed skill level of a new player before any matches have been played.
+            The default value is 25.0.
+
+        sigma (float): The initial standard deviation of a player's skill (σ).
+            This represents the system's uncertainty about the player's initial
+            skill. A higher value means the system is less certain. As a player
+            plays more games, their sigma will decrease. The default is 25.0 / 3.0.
+
+        beta (float): The "skill variance" that defines the distance in skill points
+            that gives a player an 80% chance of winning against another. A smaller
+            beta means that a smaller skill difference has a greater impact on the
+            win probability, making the system more sensitive to skill gaps.
+            The default is 25.0 / 6.0.
+
+        kappa (float): An arbitrary small positive real number that is used to prevent
+            the variance of the posterior distribution from becoming too small or
+            negative. It can also be thought of as a regularization parameter that
+            prevents ratings from changing too drastically. Represented by: κ.
+            The default value is 0.0001.
+
+        tau (float): The "dynamic factor" that is added to a player's sigma before
+            the match to account for performance variability. A higher value allows
+            for more significant rating changes based on a single match performance.
+            The default is 25.0 / 300.0.
+
+        gamma (callable): A custom function that returns the amount to be added
+            to the winning team's sigma before updating. It must accept parameters
+            for rank, num_teams, mu, sigma, team, and player_index.
+            Represented by: γ. The default is an internal `_gamma` function.
+
+        limit_sigma (bool): If True, this prevents a player's ordinal rating from
+            decreasing, even after a loss. This can be useful for maintaining
+            leaderboard stability where ranks should only ever increase or stay
+            the same. The default is False.
+
+    Note on Other Parameters:
+        - `margin`: This is not a constructor parameter but can be used with the
+        model to account for the margin of victory, which can improve accuracy
+        in games where score differences matter.
+        - `balance`: This is not a constructor parameter. It is a flag that can be
+        used to have the rating system adjust its assumptions for players at
+        the extreme ends of the skill distribution.
+
     REFERENCE:
-    - https://openskill.me/en/stable/models.html#thurstonemostellerfull
-    """
-    """
-    CURRENTLY ALL PARAMETERS ARE SET TO DEFAULT
+    - https://openskill.me/en/stable/models/openskill.models.weng_lin.thurstone_mosteller_full.html
     """
     # This instantiation creates a model for games with strict rankings (no draws).
     return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
 
-def penalize_boosting(model, teams, new_teams, logger):
+def anti_boost(model, teams, new_teams, logger):
     """
-    Penalize boosting in team ratings after model.rate update.
-    This function modifies new_teams in place to adjust mu updates for the stronger player in each team
-    when there is a significant skill gap, reducing unnatural inflation from mismatched teams.
-    Computes diff_mu as a normalized ratio in [0,1] based on mu gap (ignoring tiny gaps via MIN_MU_DIFF). Computes diff_sigma as normalized sigma gap. Applies bias only to stronger player's mu update: fixed 0.5 if diff_sigma >=0.5 and diff_mu <0.6; scaled from 0.5 to 0.95 linearly between diff_mu=0.6 and 0.8 (capped at 0.95) if diff_mu >=0.6; nothing otherwise. Sigmas unchanged from OpenSkill.
+    Prevent boosting in team ratings after model.rate update.
+
+    MODIFICATION to the algorithm. (ANTI-BOOSTING)
+    Concerns have been raised about high rated players that are boosted, meaning they have played with a second account where the player is of a significantly higher skill level than the account match-making skill level. Once the account match-making skill level matches the player's skill level, they switch to a different account. The primary account gets the benefit of easier games relative to player skills for all games it plays. This is called boosting.
+    Initially convergence was going to be used to resolve this issue, this adds an additional modifier to the updates which aims to close the gap between the two players skill level by altering gains and losses. This would reduce boosting benefit significantly. While initial convergence approach did not result in favourable results, it could still work, but it has several nuanced consequences that have to be considered.
+    From the a boosting penalty system was introduced, but now the penalty has been removed and instead its more a prevention system. This significantly reduces the impact of boosting without penalizing players who get caught in the false positives.
+
+    This function works by reducing the mu update for the higher-rated player in a team if there is a significant skill gap (mu) or uncertainty gap (sigma). The process is skipped if the absolute difference in skill is less than MIN_MU_DIFF (30) or if the season is less than five days old, allowing initial ratings to settle.
+
+    Regarding uncertainty gap, uncertainty is highest when player's are new to the system. So a brand new account would have a sigma of 8.33, while an established account, lets say 100 games would have a sigma of less than 3. If these two player's played together, the system would first calculate diff_sigma, the difference in player uncertainty normalized by SIGMA_SPREAD (the typical range of sigma values from a new to a settled player). In this case, the difference would be well over 50% (SIGMA_THRESHOLD) and so for the higher rated player this is a low impact game, meaning the rating change from the game, is reduced by 80% (SIGMA_PENALTY).
+
+    For skill gap, if the lower rated player has a skill level less than 40% (1-MU_THRESHOLD) of the higher rated player, then it is a low impact game fo the higher rated player, meaning a bias of 75% to 95% (BIAS_MIN to BIAS_MAX) is applied, reducing the rating change for the higher rated player by the amount. This scales linearly and maxes when the lower rated player has a skill level of less than 20% of the higher rated player (1-MU_SCALE_END).
     """
     SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
     MIN_MU_DIFF = 30  # Tunable: Minimum absolute mu difference to apply non-zero diff_mu
@@ -121,7 +144,6 @@ def penalize_boosting(model, teams, new_teams, logger):
         MU_THRESHOLD = 0.6
         SIGMA_THRESHOLD = 0.5
         SIGMA_PENALTY = 0.8
-        MU_SCALE_START = 0.6
         MU_SCALE_END = 0.8
         BIAS_MIN = 0.75
         BIAS_MAX = 0.95
@@ -131,7 +153,7 @@ def penalize_boosting(model, teams, new_teams, logger):
         elif diff_mu < MU_THRESHOLD:  # diff_sigma >= SIGMA_THRESHOLD, apply fixed sigma bias
             bias = SIGMA_PENALTY  # 0.75
         else:  # diff_mu >= MU_THRESHOLD, apply scaled mu bias (ignores sigma)
-            fraction = min(1.0, (diff_mu - MU_SCALE_START) / (MU_SCALE_END - MU_SCALE_START))
+            fraction = min(1.0, (diff_mu - MU_THRESHOLD) / (MU_SCALE_END - MU_THRESHOLD))
             bias = BIAS_MIN + fraction * (BIAS_MAX - BIAS_MIN)
         
         # Compute deltas and apply bias
@@ -210,7 +232,7 @@ def process_game_ratings(model, players, game_id, player_ratings, logger, game_d
         # Skip penalize_boosting if game is within 5 days of split start
         days_since_split_start = (game_date - SPLIT_START_DATE).days
         if days_since_split_start >= 5:
-            penalize_boosting(model, teams, new_teams, logger)
+            anti_boost(model, teams, new_teams, logger)
        
         # Update player_ratings
         sorted_placings = sorted(teams_by_placing.keys())

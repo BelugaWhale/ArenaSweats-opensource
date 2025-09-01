@@ -1,0 +1,7 @@
+A dataset has been curated with 3 boosters, one high ranked solo queue player and 1 "normal" player. The skill gap and uncertainty gap has been calculated for each of their games and the games have been manually labelled as to whether they are boosted games. The goal is then to create a system that successfully classifies the boosted games and does not effect standard games.
+
+In the chart we can see the green points are boosted games. The different shapes for the points denote different players. On the mu-boosting side classification is easy, but on the sigma boosting side there are some false-positives that cannot easily be classified. Practically the explanation is, boosters often queue with new accounts, those account have very high sigma. But a solo queue player may queue with someone who is playing their first arena match. They will also have a high sigma. This is why anti-boost makes these games low impact rather than penalizing. Because there will be some false positives on the sigma side.
+
+The chart shows exactly how all situations are handled. x-axis is higher uncertainty gap. and y-axis is higher skill gap. Run the python file to tweak the parameters yourself and see how things can change. 
+
+The current system is designed to be extremely simple with no impact on the majority of games as well as high precision in classification of boosted games.
