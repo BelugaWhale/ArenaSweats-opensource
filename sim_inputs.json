@@ -1,0 +1,328 @@
+{
+  "meta": {
+    "note": "Teams and placings are UNKNOWN in the provided table. Replace 'teams' and 'placings' with the true values before running a fidelity comparison.",
+    "rating_pref": "Used pre_mu_mh/pre_sigma_mh when present; otherwise pre_mu_rh/pre_sigma_rh."
+  },
+  "players": [
+    {
+      "id": "p1",
+      "name": "190cm 200lbs 22#2003",
+      "mu": 52.82110360122846,
+      "sigma": 2.13601083584655,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p2",
+      "name": "9999ix9999#999",
+      "mu": 60.391308633369896,
+      "sigma": 3.8952648590191803,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p3",
+      "name": "CarryCarrot#EUW",
+      "mu": 48.20813486573149,
+      "sigma": 1.9305416117835863,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p4",
+      "name": "Crithality#EUW",
+      "mu": 49.36175813204278,
+      "sigma": 1.9038438980926695,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p5",
+      "name": "Euterpe#lnori",
+      "mu": 42.62022194246505,
+      "sigma": 2.6328935573836714,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p6",
+      "name": "Keiko#673",
+      "mu": 55.147272240042305,
+      "sigma": 2.047407182511741,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p7",
+      "name": "Oye#Lox",
+      "mu": 43.691558729352316,
+      "sigma": 2.2735373530864478,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p8",
+      "name": "Sauron Sackpunch#RFRMD",
+      "mu": 59.286214725594,
+      "sigma": 1.9930811936690658,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p9",
+      "name": "SyndIrelia#EUW",
+      "mu": 49.87179816948501,
+      "sigma": 2.257866215358253,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p10",
+      "name": "TonGrosVié#ZZZ",
+      "mu": 52.67522867807758,
+      "sigma": 2.044003590540985,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p11",
+      "name": "Walick#EUW",
+      "mu": 54.97005864977115,
+      "sigma": 2.416995798890896,
+      "pre_source": "mh"
+    },
+    {
+      "id": "p12",
+      "name": "elliott winther#EUW",
+      "mu": 50.65879377524442,
+      "sigma": 2.5467463356243525,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p13",
+      "name": "kingo küsmuyüz#1954",
+      "mu": 36.854369608923186,
+      "sigma": 4.358707682149734,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p14",
+      "name": "verminstoptalkin#EUW",
+      "mu": 49.37962984397293,
+      "sigma": 3.25054262974749,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p15",
+      "name": "夜越晚我越嗨劈天把天劈开狂龙你爱#kekw",
+      "mu": 47.05572675546872,
+      "sigma": 1.9779876765405207,
+      "pre_source": "rh"
+    },
+    {
+      "id": "p16",
+      "name": "米津玄师#HACHI",
+      "mu": 55.98521313159716,
+      "sigma": 1.8406047463150854,
+      "pre_source": "mh"
+    }
+  ],
+  "teams": [
+    [
+      "p1",
+      "p2"
+    ],
+    [
+      "p3",
+      "p4"
+    ],
+    [
+      "p5",
+      "p6"
+    ],
+    [
+      "p7",
+      "p8"
+    ],
+    [
+      "p9",
+      "p10"
+    ],
+    [
+      "p11",
+      "p12"
+    ],
+    [
+      "p13",
+      "p14"
+    ],
+    [
+      "p15",
+      "p16"
+    ]
+  ],
+  "placings": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "targets": {
+    "p1": {
+      "mu": 53.411757588537384,
+      "sigma": 2.1332347935829006
+    },
+    "p2": {
+      "mu": 58.38743458300487,
+      "sigma": 3.8458178672638255
+    },
+    "p3": {
+      "mu": 47.902534674643746,
+      "sigma": 1.9287676195536096
+    },
+    "p6": {
+      "mu": 55.40964175448499,
+      "sigma": 2.044489972594612
+    },
+    "p8": {
+      "mu": 58.888900836684265,
+      "sigma": 1.9900212222301497
+    },
+    "p10": {
+      "mu": 53.21617017409561,
+      "sigma": 2.041844722384972
+    },
+    "p11": {
+      "mu": 53.560478040310926,
+      "sigma": 2.4112614881764705
+    },
+    "p16": {
+      "mu": 56.82344958512775,
+      "sigma": 1.839484862922761
+    }
+  },
+  "target_games": [
+    {
+      "player_id": "p1",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": 0.5906539873089258,
+      "pregame_mu": 52.82110360122846,
+      "pregame_sigma": 2.13601083584655
+    },
+    {
+      "player_id": "p2",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": -2.0038740503650274,
+      "pregame_mu": 60.391308633369896,
+      "pregame_sigma": 3.8952648590191803
+    },
+    {
+      "player_id": "p3",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": -0.3056001910877413,
+      "pregame_mu": 48.20813486573149,
+      "pregame_sigma": 1.9305416117835863
+    },
+    {
+      "player_id": "p4",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 49.36175813204278,
+      "pregame_sigma": 1.9038438980926695
+    },
+    {
+      "player_id": "p5",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 42.62022194246505,
+      "pregame_sigma": 2.6328935573836714
+    },
+    {
+      "player_id": "p6",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": 0.26236951444268186,
+      "pregame_mu": 55.147272240042305,
+      "pregame_sigma": 2.047407182511741
+    },
+    {
+      "player_id": "p7",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 43.691558729352316,
+      "pregame_sigma": 2.2735373530864478
+    },
+    {
+      "player_id": "p8",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": -0.3973138889097356,
+      "pregame_mu": 59.286214725594,
+      "pregame_sigma": 1.9930811936690658
+    },
+    {
+      "player_id": "p9",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 49.87179816948501,
+      "pregame_sigma": 2.257866215358253
+    },
+    {
+      "player_id": "p10",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": 0.5409414960180285,
+      "pregame_mu": 52.67522867807758,
+      "pregame_sigma": 2.044003590540985
+    },
+    {
+      "player_id": "p11",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": -1.409580609460221,
+      "pregame_mu": 54.97005864977115,
+      "pregame_sigma": 2.416995798890896
+    },
+    {
+      "player_id": "p12",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 50.65879377524442,
+      "pregame_sigma": 2.5467463356243525
+    },
+    {
+      "player_id": "p13",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 36.854369608923186,
+      "pregame_sigma": 4.358707682149734
+    },
+    {
+      "player_id": "p14",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 49.37962984397293,
+      "pregame_sigma": 3.25054262974749
+    },
+    {
+      "player_id": "p15",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": null,
+      "pregame_mu": 47.05572675546872,
+      "pregame_sigma": 1.9779876765405207
+    },
+    {
+      "player_id": "p16",
+      "game_id": "KqFazGhft1U5T-8k0oGp_Uwy7AGHvwX8clTzcjcBmUU=",
+      "placing": "",
+      "rating_change": 0.838236453530584,
+      "pregame_mu": 55.98521313159716,
+      "pregame_sigma": 1.8406047463150854
+    }
+  ]
+}
