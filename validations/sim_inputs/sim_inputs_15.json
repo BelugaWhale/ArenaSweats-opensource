@@ -1,0 +1,280 @@
+{
+  "meta": {
+    "note": "Teams formed by grouping two players sharing the same team_placing. Placings 1..8 map directly.",
+    "rating_pref": "Used pre_mu_mh/pre_sigma_mh when present; otherwise pre_mu_rh/pre_sigma_rh."
+  },
+  "players": [
+    {
+      "id": "p1",
+      "name": "Arbuz#bomba",
+      "mu": 79.14639397293668,
+      "sigma": 3.4261513957297502,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p2",
+      "name": "Abdiego#HD69",
+      "mu": 49.28527708705344,
+      "sigma": 5.9099001182447495,
+      "pre_source": "rh",
+      "team_placing": 1
+    },
+    {
+      "id": "p3",
+      "name": "Zebelius#Chex",
+      "mu": 51.49915690953783,
+      "sigma": 1.886558515951465,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p4",
+      "name": "Mathic#EUW",
+      "mu": 50.17311185427955,
+      "sigma": 1.869553617538527,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p5",
+      "name": "Uptown Dunk#Bulk",
+      "mu": 58.37594335841257,
+      "sigma": 2.2123805952982325,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p6",
+      "name": "Simga#Simga",
+      "mu": 56.31121200951443,
+      "sigma": 2.290410157330319,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p7",
+      "name": "5MEGMINATOR3000#LUBE",
+      "mu": 54.96567806785231,
+      "sigma": 1.7354481789594194,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p8",
+      "name": "XxRobloxDaddyxX#6969",
+      "mu": 49.12597706973331,
+      "sigma": 3.3115824863048684,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p9",
+      "name": "Nephalem#Fall",
+      "mu": 51.59164039938699,
+      "sigma": 3.328499292438679,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p10",
+      "name": "flowstate#5 6",
+      "mu": 53.6054992618023,
+      "sigma": 3.3530691795565652,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p11",
+      "name": "Jan Plan#jan",
+      "mu": 51.611649843664075,
+      "sigma": 1.9707278987309214,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p12",
+      "name": "SheldonBazinga#Young",
+      "mu": 49.680712836638016,
+      "sigma": 1.670461127456995,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p13",
+      "name": "我爱发育#078",
+      "mu": 61.36785377169537,
+      "sigma": 1.9104702024654099,
+      "pre_source": "mh",
+      "team_placing": 7
+    },
+    {
+      "id": "p14",
+      "name": "lonely#zzxb",
+      "mu": 55.19178278601883,
+      "sigma": 1.9851778181966404,
+      "pre_source": "rh",
+      "team_placing": 7
+    },
+    {
+      "id": "p15",
+      "name": "Timmy likes tft#EUW",
+      "mu": 49.14947253515083,
+      "sigma": 2.3252383754037997,
+      "pre_source": "rh",
+      "team_placing": 8
+    },
+    {
+      "id": "p16",
+      "name": "Lorceon#EUW",
+      "mu": 51.032351304496125,
+      "sigma": 1.7208445676963473,
+      "pre_source": "rh",
+      "team_placing": 8
+    }
+  ],
+  "teams": [
+    ["p1", "p2"],
+    ["p3", "p4"],
+    ["p5", "p6"],
+    ["p7", "p8"],
+    ["p9", "p10"],
+    ["p11", "p12"],
+    ["p13", "p14"],
+    ["p15", "p16"]
+  ],
+  "placings": [1, 2, 3, 4, 5, 6, 7, 8],
+  "targets": {
+    "p1": { "mu": 80.14354064798599, "sigma": 3.4037937270831478 }
+  },
+  "target_games": [
+    {
+      "player_id": "p1",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 1,
+      "rating_change": 0.99714667504931,
+      "pregame_mu": 79.14639397293668,
+      "pregame_sigma": 3.4261513957297502
+    },
+    {
+      "player_id": "p2",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 1,
+      "rating_change": null,
+      "pregame_mu": 49.28527708705344,
+      "pregame_sigma": 5.9099001182447495
+    },
+    {
+      "player_id": "p3",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 2,
+      "rating_change": null,
+      "pregame_mu": 51.49915690953783,
+      "pregame_sigma": 1.886558515951465
+    },
+    {
+      "player_id": "p4",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 2,
+      "rating_change": null,
+      "pregame_mu": 50.17311185427955,
+      "pregame_sigma": 1.869553617538527
+    },
+    {
+      "player_id": "p5",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 3,
+      "rating_change": null,
+      "pregame_mu": 58.37594335841257,
+      "pregame_sigma": 2.2123805952982325
+    },
+    {
+      "player_id": "p6",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 3,
+      "rating_change": null,
+      "pregame_mu": 56.31121200951443,
+      "pregame_sigma": 2.290410157330319
+    },
+    {
+      "player_id": "p7",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 4,
+      "rating_change": null,
+      "pregame_mu": 54.96567806785231,
+      "pregame_sigma": 1.7354481789594194
+    },
+    {
+      "player_id": "p8",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 4,
+      "rating_change": null,
+      "pregame_mu": 49.12597706973331,
+      "pregame_sigma": 3.3115824863048684
+    },
+    {
+      "player_id": "p9",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 5,
+      "rating_change": null,
+      "pregame_mu": 51.59164039938699,
+      "pregame_sigma": 3.328499292438679
+    },
+    {
+      "player_id": "p10",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 5,
+      "rating_change": null,
+      "pregame_mu": 53.6054992618023,
+      "pregame_sigma": 3.3530691795565652
+    },
+    {
+      "player_id": "p11",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 6,
+      "rating_change": null,
+      "pregame_mu": 51.611649843664075,
+      "pregame_sigma": 1.9707278987309214
+    },
+    {
+      "player_id": "p12",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 6,
+      "rating_change": null,
+      "pregame_mu": 49.680712836638016,
+      "pregame_sigma": 1.670461127456995
+    },
+    {
+      "player_id": "p13",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 7,
+      "rating_change": null,
+      "pregame_mu": 61.36785377169537,
+      "pregame_sigma": 1.9104702024654099
+    },
+    {
+      "player_id": "p14",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 7,
+      "rating_change": null,
+      "pregame_mu": 55.19178278601883,
+      "pregame_sigma": 1.9851778181966404
+    },
+    {
+      "player_id": "p15",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 8,
+      "rating_change": null,
+      "pregame_mu": 49.14947253515083,
+      "pregame_sigma": 2.3252383754037997
+    },
+    {
+      "player_id": "p16",
+      "game_id": "WfYe8TQY7YQ-K1CLlFEvXyOOmue5JR18mxkV4rRugEY=",
+      "placing": 8,
+      "rating_change": null,
+      "pregame_mu": 51.032351304496125,
+      "pregame_sigma": 1.7208445676963473
+    }
+  ]
+}

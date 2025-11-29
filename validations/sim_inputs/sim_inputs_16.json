@@ -1,0 +1,281 @@
+{
+  "meta": {
+    "note": "Teams formed by grouping two players sharing the same team_placing. Placings 1..8 map directly.",
+    "rating_pref": "Used pre_mu_mh/pre_sigma_mh when present; otherwise pre_mu_rh/pre_sigma_rh."
+  },
+  "players": [
+    {
+      "id": "p1",
+      "name": "Mr Mquodo#EU1",
+      "mu": 53.735617968642956,
+      "sigma": 1.8809249592061799,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p2",
+      "name": "K4NTERA#EUW",
+      "mu": 47.26065636513391,
+      "sigma": 2.136191892591116,
+      "pre_source": "rh",
+      "team_placing": 8
+    },
+    {
+      "id": "p3",
+      "name": "HellRa1sser#Hell",
+      "mu": 45.93638003521673,
+      "sigma": 1.7979396274440664,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p4",
+      "name": "Firas#5955",
+      "mu": 53.16970812638895,
+      "sigma": 2.5691568093188573,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p5",
+      "name": "Balou#1902",
+      "mu": 60.92513073972115,
+      "sigma": 1.7700638182747077,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p6",
+      "name": "IPS Baymaxed#IPS",
+      "mu": 52.74349670415233,
+      "sigma": 2.2440360070969723,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p7",
+      "name": "I Count Two Guns#EUW",
+      "mu": 45.585275820504535,
+      "sigma": 1.9019330718669594,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p8",
+      "name": "ROI DU PAIN#PAIN",
+      "mu": 57.60786069547693,
+      "sigma": 1.7204971400311866,
+      "pre_source": "rh",
+      "team_placing": 8
+    },
+    {
+      "id": "p9",
+      "name": "Uptown Dunk#Bulk",
+      "mu": 58.37594335841257,
+      "sigma": 2.2123805952982325,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p10",
+      "name": "Homiesensual#1337",
+      "mu": 53.67144269339221,
+      "sigma": 2.009787265396413,
+      "pre_source": "rh",
+      "team_placing": 7
+    },
+    {
+      "id": "p11",
+      "name": "Simga#Simga",
+      "mu": 56.31121200951443,
+      "sigma": 2.290410157330319,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p12",
+      "name": "stopksman#skm",
+      "mu": 50.50915872808174,
+      "sigma": 1.6917440600103293,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p13",
+      "name": "Arbuz#bomba",
+      "mu": 77.9305418068686,
+      "sigma": 3.452147266328508,
+      "pre_source": "rh",
+      "team_placing": 1
+    },
+    {
+      "id": "p14",
+      "name": "ByaSTV#EUW",
+      "mu": 51.897720003770495,
+      "sigma": 1.6818203116088843,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p15",
+      "name": "Abdiego#HD69",
+      "mu": 49.28527708705344,
+      "sigma": 5.9099001182447495,
+      "pre_source": "rh",
+      "team_placing": 1
+    },
+    {
+      "id": "p16",
+      "name": "KittyPaws#2000",
+      "mu": 38.50885294443775,
+      "sigma": 2.158247226910461,
+      "pre_source": "rh",
+      "team_placing": 7
+    }
+  ],
+  "teams": [
+    ["p13", "p15"],
+    ["p1", "p7"],
+    ["p9", "p11"],
+    ["p4", "p6"],
+    ["p3", "p5"],
+    ["p12", "p14"],
+    ["p10", "p16"],
+    ["p2", "p8"]
+  ],
+  "placings": [1, 2, 3, 4, 5, 6, 7, 8],
+  "targets": {
+    "p5": { "mu": 60.616920985830504, "sigma": 1.7698808572652076 },
+    "p13": { "mu": 80.78867184053117, "sigma": 3.387253391706392 }
+  },
+  "target_games": [
+    {
+      "player_id": "p1",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 2,
+      "rating_change": null,
+      "pregame_mu": 53.735617968642956,
+      "pregame_sigma": 1.8809249592061799
+    },
+    {
+      "player_id": "p2",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 8,
+      "rating_change": null,
+      "pregame_mu": 47.26065636513391,
+      "pregame_sigma": 2.136191892591116
+    },
+    {
+      "player_id": "p3",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 5,
+      "rating_change": null,
+      "pregame_mu": 45.93638003521673,
+      "pregame_sigma": 1.7979396274440664
+    },
+    {
+      "player_id": "p4",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 4,
+      "rating_change": null,
+      "pregame_mu": 53.16970812638895,
+      "pregame_sigma": 2.5691568093188573
+    },
+    {
+      "player_id": "p5",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 5,
+      "rating_change": null,
+      "pregame_mu": 60.92513073972115,
+      "pregame_sigma": 1.7700638182747077
+    },
+    {
+      "player_id": "p6",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 4,
+      "rating_change": null,
+      "pregame_mu": 52.74349670415233,
+      "pregame_sigma": 2.2440360070969723
+    },
+    {
+      "player_id": "p7",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 2,
+      "rating_change": null,
+      "pregame_mu": 45.585275820504535,
+      "pregame_sigma": 1.9019330718669594
+    },
+    {
+      "player_id": "p8",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 8,
+      "rating_change": null,
+      "pregame_mu": 57.60786069547693,
+      "pregame_sigma": 1.7204971400311866
+    },
+    {
+      "player_id": "p9",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 3,
+      "rating_change": null,
+      "pregame_mu": 58.37594335841257,
+      "pregame_sigma": 2.2123805952982325
+    },
+    {
+      "player_id": "p10",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 7,
+      "rating_change": null,
+      "pregame_mu": 53.67144269339221,
+      "pregame_sigma": 2.009787265396413
+    },
+    {
+      "player_id": "p11",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 3,
+      "rating_change": null,
+      "pregame_mu": 56.31121200951443,
+      "pregame_sigma": 2.290410157330319
+    },
+    {
+      "player_id": "p12",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 6,
+      "rating_change": null,
+      "pregame_mu": 50.50915872808174,
+      "pregame_sigma": 1.6917440600103293
+    },
+    {
+      "player_id": "p13",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 1,
+      "rating_change": null,
+      "pregame_mu": 77.9305418068686,
+      "pregame_sigma": 3.452147266328509
+    },
+    {
+      "player_id": "p14",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 6,
+      "rating_change": null,
+      "pregame_mu": 51.897720003770495,
+      "pregame_sigma": 1.6818203116088843
+    },
+    {
+      "player_id": "p15",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 1,
+      "rating_change": null,
+      "pregame_mu": 49.28527708705344,
+      "pregame_sigma": 5.9099001182447495
+    },
+    {
+      "player_id": "p16",
+      "game_id": "WfYe8TQY7YQkX_Eyip5p1rih1G65FqMiElL8wh2ZZ9Y=",
+      "placing": 7,
+      "rating_change": null,
+      "pregame_mu": 38.50885294443775,
+      "pregame_sigma": 2.158247226910461
+    }
+  ]
+}

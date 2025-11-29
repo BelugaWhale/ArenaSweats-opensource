@@ -1,0 +1,171 @@
+{
+  "meta": {
+    "note": "Teams formed by grouping two players sharing the same team_placing. Placings 1..8 map directly.",
+    "rating_pref": "Used pre_mu_mh/pre_sigma_mh when present; otherwise pre_mu_rh/pre_sigma_rh."
+  },
+  "players": [
+    {
+      "id": "p1",
+      "name": "PETERBOT#EU1",
+      "mu": 58.04257443583094,
+      "sigma": 1.9814828109573666,
+      "pre_source": "mh",
+      "team_placing": 2
+    },
+    {
+      "id": "p2",
+      "name": "Groveseer#EUW",
+      "mu": 48.83249957879768,
+      "sigma": 3.826915343305684,
+      "pre_source": "rh",
+      "team_placing": 1
+    },
+    {
+      "id": "p3",
+      "name": "신류진#aries",
+      "mu": 47.962193607785196,
+      "sigma": 2.126489897349665,
+      "pre_source": "rh",
+      "team_placing": 8
+    },
+    {
+      "id": "p4",
+      "name": "El Bardô#858",
+      "mu": 46.99474115413172,
+      "sigma": 1.6693903534706884,
+      "pre_source": "rh",
+      "team_placing": 7
+    },
+    {
+      "id": "p5",
+      "name": "Shoto AYAYA#BBL",
+      "mu": 60.09705708696054,
+      "sigma": 2.0793675051595626,
+      "pre_source": "mh",
+      "team_placing": 8
+    },
+    {
+      "id": "p6",
+      "name": "Daniel#rat",
+      "mu": 62.7942518830563,
+      "sigma": 1.780491872667972,
+      "pre_source": "mh",
+      "team_placing": 3
+    },
+    {
+      "id": "p7",
+      "name": "Setsuko Yokokawa#EUW",
+      "mu": 49.71250821723308,
+      "sigma": 1.823026712492981,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p8",
+      "name": "TukaKappa#EUW",
+      "mu": 52.98881021037223,
+      "sigma": 1.8426904244181916,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p9",
+      "name": "xNessu#7777",
+      "mu": 52.27252230241371,
+      "sigma": 1.684640621219919,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p10",
+      "name": "DianLaBaXiongDi#CHN",
+      "mu": 51.78468084849503,
+      "sigma": 2.955669906347782,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p11",
+      "name": "Lauwura#Bee",
+      "mu": 48.978148508095984,
+      "sigma": 2.629889489070789,
+      "pre_source": "rh",
+      "team_placing": 7
+    },
+    {
+      "id": "p12",
+      "name": "time tells#EUW",
+      "mu": 52.61306902412561,
+      "sigma": 2.0390546128555713,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p13",
+      "name": "Meeeeeeeow#EUW",
+      "mu": 73.66197586267934,
+      "sigma": 2.2827398544181907,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p14",
+      "name": "SaitoVallière#EDÉN",
+      "mu": 48.6875238749163,
+      "sigma": 1.918643813126866,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p15",
+      "name": "Zurieru#EUW",
+      "mu": 49.37019250695489,
+      "sigma": 3.9270332815553775,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p16",
+      "name": "Hank V9#EUW",
+      "mu": 43.13243928184633,
+      "sigma": 2.4194943692676683,
+      "pre_source": "rh",
+      "team_placing": 3
+    }
+  ],
+  "teams": [
+    ["p2", "p13"],
+    ["p1", "p8"],
+    ["p6", "p16"],
+    ["p10", "p14"],
+    ["p7", "p9"],
+    ["p12", "p15"],
+    ["p4", "p11"],
+    ["p3", "p5"]
+  ],
+  "placings": [1, 2, 3, 4, 5, 6, 7, 8],
+  "targets": {
+    "p1": { "mu": 58.52312886327165, "sigma": 1.9803592736370343 },
+    "p5": { "mu": 58.975335115374, "sigma": 2.0765938372017074 },
+    "p6": { "mu": 63.11384079910131, "sigma": 1.7799895197038211 },
+    "p13": { "mu": 74.17938783279996, "sigma": 2.278939555341074 }
+  },
+  "target_games": [
+    { "player_id": "p1",  "game_id": null, "placing": null, "rating_change": 0.48055442744071,   "pregame_mu": 58.04257443583094, "pregame_sigma": 1.9814828109573666 },
+    { "player_id": "p2",  "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 48.83249957879768, "pregame_sigma": 3.826915343305684 },
+    { "player_id": "p3",  "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 47.962193607785196, "pregame_sigma": 2.126489897349665 },
+    { "player_id": "p4",  "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 46.99474115413172, "pregame_sigma": 1.6693903534706884 },
+    { "player_id": "p5",  "game_id": null, "placing": null, "rating_change": -1.12172197158654,      "pregame_mu": 60.09705708696054, "pregame_sigma": 2.0793675051595626 },
+    { "player_id": "p6",  "game_id": null, "placing": null, "rating_change": 0.31958891604501,       "pregame_mu": 62.7942518830563, "pregame_sigma": 1.780491872667972 },
+    { "player_id": "p7",  "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 49.71250821723308, "pregame_sigma": 1.823026712492981 },
+    { "player_id": "p8",  "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 52.98881021037223, "pregame_sigma": 1.8426904244181916 },
+    { "player_id": "p9",  "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 52.27252230241371, "pregame_sigma": 1.684640621219919 },
+    { "player_id": "p10", "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 51.78468084849503, "pregame_sigma": 2.955669906347782 },
+    { "player_id": "p11", "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 48.978148508095984, "pregame_sigma": 2.629889489070789 },
+    { "player_id": "p12", "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 52.61306902412561, "pregame_sigma": 2.0390546128555713 },
+    { "player_id": "p13", "game_id": null, "placing": null, "rating_change": 0.51741197012062,       "pregame_mu": 73.66197586267934, "pregame_sigma": 2.2827398544181907 },
+    { "player_id": "p14", "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 48.6875238749163, "pregame_sigma": 1.918643813126866 },
+    { "player_id": "p15", "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 49.37019250695489, "pregame_sigma": 3.9270332815553775 },
+    { "player_id": "p16", "game_id": null, "placing": null, "rating_change": null,                    "pregame_mu": 43.13243928184633, "pregame_sigma": 2.4194943692676683 }
+  ]
+}

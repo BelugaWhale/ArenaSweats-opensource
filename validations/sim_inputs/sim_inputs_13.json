@@ -1,0 +1,170 @@
+{
+  "meta": {
+    "note": "Teams formed by grouping two players sharing the same team_placing. Placings 1..8 map directly.",
+    "rating_pref": "Used pre_mu_mh/pre_sigma_mh when present; otherwise pre_mu_rh/pre_sigma_rh."
+  },
+  "players": [
+    {
+      "id": "p1",
+      "name": "itselox#3232",
+      "mu": 58.65316536963534,
+      "sigma": 1.683122075637905,
+      "pre_source": "mh",
+      "team_placing": 4
+    },
+    {
+      "id": "p2",
+      "name": "Éphèbe#8888",
+      "mu": 54.69632672700886,
+      "sigma": 1.7825921016153454,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p3",
+      "name": "Zeynoth#EUW",
+      "mu": 53.10772429209216,
+      "sigma": 1.904687178352477,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p4",
+      "name": "Colvex#0000",
+      "mu": 48.075738916218334,
+      "sigma": 2.312143265204736,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p5",
+      "name": "Aloof#Loofi",
+      "mu": 44.437863672750105,
+      "sigma": 1.8678421396208809,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p6",
+      "name": "Hwr1#ssad",
+      "mu": 43.662302087877556,
+      "sigma": 1.8035413187791598,
+      "pre_source": "rh",
+      "team_placing": 4
+    },
+    {
+      "id": "p7",
+      "name": "MadMango89#ZaZa",
+      "mu": 67.43583916390693,
+      "sigma": 4.279124204348392,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p8",
+      "name": "SKIBIDI BRIAR#XDDDD",
+      "mu": 52.98518196672462,
+      "sigma": 1.7705233948520294,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p9",
+      "name": "PropoPito#Pro",
+      "mu": 43.16074220156731,
+      "sigma": 1.8422731763564997,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p10",
+      "name": "CoachSharkz#EUW",
+      "mu": 55.19511734324262,
+      "sigma": 1.7005178448905693,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p11",
+      "name": "Freks#Freks",
+      "mu": 49.14332297752992,
+      "sigma": 2.1742468100259655,
+      "pre_source": "rh",
+      "team_placing": 8
+    },
+    {
+      "id": "p12",
+      "name": "Nicht5icher#EUW",
+      "mu": 48.4029146884546,
+      "sigma": 2.984762445429417,
+      "pre_source": "rh",
+      "team_placing": 7
+    },
+    {
+      "id": "p13",
+      "name": "AEROX#SNT",
+      "mu": 53.850342742175755,
+      "sigma": 1.7943798740862145,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p14",
+      "name": "Nidalee#white",
+      "mu": 67.43583916390693,
+      "sigma": 4.279124204348392,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p15",
+      "name": "paka#mute",
+      "mu": 49.157152345447166,
+      "sigma": 1.8406720251968318,
+      "pre_source": "rh",
+      "team_placing": 7
+    },
+    {
+      "id": "p16",
+      "name": "Sonahole#uwu",
+      "mu": 47.327842904722885,
+      "sigma": 1.9566373672789754,
+      "pre_source": "rh",
+      "team_placing": 8
+    }
+  ],
+  "teams": [
+    ["p7", "p14"],
+    ["p3", "p5"],
+    ["p2", "p8"],
+    ["p1", "p6"],
+    ["p4", "p10"],
+    ["p9", "p13"],
+    ["p12", "p15"],
+    ["p11", "p16"]
+  ],
+  "placings": [1, 2, 3, 4, 5, 6, 7, 8],
+  "targets": {
+    "p1": { "mu": 58.788017859412804, "sigma": 1.683435892509696 },
+    "p7": { "mu": 68.21342570893678, "sigma": 4.252949439537134 },
+    "p14": { "mu": 68.21342570893678, "sigma": 4.252949439537134 }
+  },
+  "target_games": [
+    { "player_id": "p1", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 4, "rating_change": 0.134852489777464, "pregame_mu": 58.65316536963534, "pregame_sigma": 1.683122075637905 },
+    { "player_id": "p2", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 3, "rating_change": null, "pregame_mu": 54.69632672700886, "pregame_sigma": 1.7825921016153454 },
+    { "player_id": "p3", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 2, "rating_change": null, "pregame_mu": 53.10772429209216, "pregame_sigma": 1.904687178352477 },
+    { "player_id": "p4", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 5, "rating_change": null, "pregame_mu": 48.075738916218334, "pregame_sigma": 2.312143265204736 },
+    { "player_id": "p5", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 2, "rating_change": null, "pregame_mu": 44.437863672750105, "pregame_sigma": 1.8678421396208809 },
+    { "player_id": "p6", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 4, "rating_change": null, "pregame_mu": 43.662302087877556, "pregame_sigma": 1.8035413187791598 },
+    { "player_id": "p7", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 1, "rating_change": 0.77758654502985, "pregame_mu": 67.43583916390693, "pregame_sigma": 4.279124204348392 },
+    { "player_id": "p8", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 3, "rating_change": null, "pregame_mu": 52.98518196672462, "pregame_sigma": 1.7705233948520294 },
+    { "player_id": "p9", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 6, "rating_change": null, "pregame_mu": 43.16074220156731, "pregame_sigma": 1.8422731763564997 },
+    { "player_id": "p10", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 5, "rating_change": null, "pregame_mu": 55.19511734324262, "pregame_sigma": 1.7005178448905693 },
+    { "player_id": "p11", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 8, "rating_change": null, "pregame_mu": 49.14332297752992, "pregame_sigma": 2.1742468100259655 },
+    { "player_id": "p12", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 7, "rating_change": null, "pregame_mu": 48.4029146884546, "pregame_sigma": 2.984762445429417 },
+    { "player_id": "p13", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 6, "rating_change": null, "pregame_mu": 53.850342742175755, "pregame_sigma": 1.7943798740862145 },
+    { "player_id": "p14", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 1, "rating_change": 0.77758654502985, "pregame_mu": 67.43583916390693, "pregame_sigma": 4.279124204348392 },
+    { "player_id": "p15", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 7, "rating_change": null, "pregame_mu": 49.157152345447166, "pregame_sigma": 1.8406720251968318 },
+    { "player_id": "p16", "game_id": "KqFazGhft1WIXsYy4Ay9T3Oa9bf2u87j4HsMZfJq9Ks=", "placing": 8, "rating_change": null, "pregame_mu": 47.327842904722885, "pregame_sigma": 1.9566373672789754 }
+  ]
+}

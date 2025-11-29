@@ -7,6 +7,30 @@ from datetime import datetime, timezone
 RANK_SPLIT = "2025 Split 3"
 SPLIT_START_DATE = datetime(2025, 8, 27, tzinfo=timezone.utc)
 
+# Global configuration for teammate gap penalty.
+# PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
+#                         higher player's mu/sigma delta once fully penalised.
+# PENALTY_CURVE_K: power exponent controlling how quickly the penalty ramps
+#                  up between trigger and saturation.
+# GAP_TRIGGER: relative mu gap (0-1) at which the penalty starts to apply.
+# GAP_SATURATION: relative mu gap (0-1) at which we are fully at
+#                 PENALTY_MIN_MULTIPLIER and remain flat afterwards.
+PENALTY_MIN_MULTIPLIER = 0.05
+PENALTY_CURVE_K = 2
+GAP_TRIGGER = 0
+GAP_SATURATION = 0.65
+
+# Unbalanced lobby configuration.
+# A team is considered "unbalanced" if its average mu is above the lobby's
+# average team mu by at least UNBALANCED_LOBBY_THRESHOLD (fractional).
+# The check is only performed for teams where both players are GM+.
+# For such unbalanced teams, we temporarily reduce their mu by
+# UNBALANCED_TEAM_MU_REDUCTION before calling model.rate. After rating
+# updates we apply the resulting delta mu/sigma on top of the original
+# (unreduced) mu/sigma.
+UNBALANCED_LOBBY_THRESHOLD = 0.10       # 10% above lobby median team mu
+UNBALANCED_TEAM_MU_REDUCTION = 0.125    # Apply 12.5% of the gap as a temporary mu reduction
+
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
 Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
@@ -94,91 +118,191 @@ def instantiate_rating_model():
     - https://openskill.me/en/stable/models/openskill.models.weng_lin.thurstone_mosteller_full.html
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))
+    model = ThurstoneMostellerFull(beta=(25/6) * 4, tau=(25/300))
 
-def anti_boost(model, teams, new_teams, logger):
+    return model
+
+def _teammate_penalty_scale(gap_pct: float) -> float:
     """
-    Prevent boosting in team ratings after model.rate update.
-
-    MODIFICATION to the algorithm. (ANTI-BOOSTING)
-    Concerns have been raised about high rated players that are boosted, meaning they have played with a second account where the player is of a significantly higher skill level than the account match-making skill level. Once the account match-making skill level matches the player's skill level, they switch to a different account. The primary account gets the benefit of easier games relative to player skills for all games it plays. This is called boosting.
-    Initially convergence was going to be used to resolve this issue, this adds an additional modifier to the updates which aims to close the gap between the two players skill level by altering gains and losses. This would reduce boosting benefit significantly. While initial convergence approach did not result in favourable results, it could still work, but it has several nuanced consequences that have to be considered.
-    From the a boosting penalty system was introduced, but now the penalty has been removed and instead its more a prevention system. This significantly reduces the impact of boosting without penalizing players who get caught in the false positives.
-
-    This function works by reducing the mu update for the higher-rated player in a team if there is a significant skill gap (mu) or uncertainty gap (sigma). The process is skipped if the absolute difference in skill is less than MIN_MU_DIFF (30) or if the season is less than five days old, allowing initial ratings to settle.
-
-    Regarding uncertainty gap, uncertainty is highest when player's are new to the system. So a brand new account would have a sigma of 8.33, while an established account, lets say 100 games would have a sigma of less than 3. If these two player's played together, the system would first calculate diff_sigma, the difference in player uncertainty normalized by SIGMA_SPREAD (the typical range of sigma values from a new to a settled player). In this case, the difference would be well over 50% (SIGMA_THRESHOLD) and so for the higher rated player this is a low impact game, meaning the rating change from the game, is reduced by 80% (SIGMA_PENALTY).
-
-    For skill gap, if the lower rated player has a skill level less than 40% (1-MU_THRESHOLD) of the higher rated player, then it is a low impact game fo the higher rated player, meaning a bias of 75% to 95% (BIAS_MIN to BIAS_MAX) is applied, reducing the rating change for the higher rated player by the amount. This scales linearly and maxes when the lower rated player has a skill level of less than 20% of the higher rated player (1-MU_SCALE_END).
+    Compute the multiplier for the high-mu player's mu/sigma delta,
+    based on the relative mu gap in [0, 1].
     """
-    SIGMA_SPREAD = 8.33 - 1.5  # Fixed: 6.83, initial to steady-state sigma
-    MIN_MU_DIFF = 30  # Tunable: Minimum absolute mu difference to apply non-zero diff_mu
-    
+    # Below the trigger we do nothing.
+    if gap_pct <= GAP_TRIGGER:
+        return 1.0
+
+    # At or above saturation, use the minimum multiplier (flat line).
+    if gap_pct >= GAP_SATURATION:
+        return PENALTY_MIN_MULTIPLIER
+
+    # Normalise gap from [GAP_TRIGGER, GAP_SATURATION] -> [0, 1]
+    x = (gap_pct - GAP_TRIGGER) / (GAP_SATURATION - GAP_TRIGGER)
+
+    # Power curve:
+    #   x in [0,1]
+    #   scale(0) = 1.0 (no penalty at trigger)
+    #   scale(1) = PENALTY_MIN_MULTIPLIER (fully penalised at saturation gap)
+    #   Larger PENALTY_CURVE_K => flatter near trigger, steeper near saturation.
+    scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * (x ** PENALTY_CURVE_K)
+
+    # Clamp to safety range
+    return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
+
+def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None):
+    """
+    Post-process rating updates to dampen gains/losses for the higher-mu player
+    in teams with large mu gaps, but only when that player is "high rated".
+    """
     for i in range(len(teams)):
-        old_p1 = teams[i][0]
-        old_p2 = teams[i][1]
-        new_p1_temp = new_teams[i][0]
-        new_p2_temp = new_teams[i][1]
-        
-        # Identify weaker and stronger
-        p1_weaker = old_p1.mu <= old_p2.mu
-        if p1_weaker:
-            weaker_mu = old_p1.mu
-            stronger_mu = old_p2.mu
-        else:
-            weaker_mu = old_p2.mu
-            stronger_mu = old_p1.mu
-        
-        # Compute diff_mu with ratio-based formula
-        abs_mu_diff = abs(weaker_mu - stronger_mu)
-        if abs_mu_diff < MIN_MU_DIFF:
-            diff_mu = 0.0
-        else:
-            diff_mu = 1 - abs(weaker_mu) / abs_mu_diff
-            diff_mu = min(1.0, max(0.0, diff_mu))  # Normalize to [0,1] for consistent blending
-        
-        # Compute diff_sigma
-        diff_sigma = abs(old_p1.sigma - old_p2.sigma) / SIGMA_SPREAD if SIGMA_SPREAD > 0 else 0.0
-        
-        # New bias logic: separate thresholds with linear scaling for mu
-        MU_THRESHOLD = 0.6
-        SIGMA_THRESHOLD = 0.5
-        SIGMA_PENALTY = 0.8
-        MU_SCALE_END = 0.8
-        BIAS_MIN = 0.75
-        BIAS_MAX = 0.95
-        
-        if diff_mu < MU_THRESHOLD and diff_sigma < SIGMA_THRESHOLD:
-            continue  # Do nothing for this team
-        elif diff_mu < MU_THRESHOLD:  # diff_sigma >= SIGMA_THRESHOLD, apply fixed sigma bias
-            bias = SIGMA_PENALTY  # 0.75
-        else:  # diff_mu >= MU_THRESHOLD, apply scaled mu bias (ignores sigma)
-            fraction = min(1.0, (diff_mu - MU_THRESHOLD) / (MU_SCALE_END - MU_THRESHOLD))
-            bias = BIAS_MIN + fraction * (BIAS_MAX - BIAS_MIN)
-        
-        # Compute deltas and apply bias
-        delta_mu_1 = new_p1_temp.mu - old_p1.mu
-        delta_mu_2 = new_p2_temp.mu - old_p2.mu
-        if p1_weaker:
-            # Weaker unchanged
-            final_mu_1 = new_p1_temp.mu
-            # Adjust stronger
-            final_delta_2 = delta_mu_2 * (1 - bias)
-            final_mu_2 = old_p2.mu + final_delta_2
-        else:
-            # Weaker unchanged
-            final_mu_2 = new_p2_temp.mu
-            # Adjust stronger
-            final_delta_1 = delta_mu_1 * (1 - bias)
-            final_mu_1 = old_p1.mu + final_delta_1
-        
-        # Replace with new ratings
-        new_teams[i] = [
-            model.rating(mu=final_mu_1, sigma=new_p1_temp.sigma),
-            model.rating(mu=final_mu_2, sigma=new_p2_temp.sigma)
-        ]
+        if gm_team_any is not None and not gm_team_any[i]:
+            continue
 
-def process_game_ratings(model, players, game_id, player_ratings, logger, game_date):
+        old_p1, old_p2 = teams[i]
+        new_p1, new_p2 = new_teams[i]
+
+        # Identify higher and lower pre-game mu
+        if old_p1.mu >= old_p2.mu:
+            hi_old, lo_old = old_p1, old_p2
+            hi_new, lo_new = new_p1, new_p2
+            hi_index = 0
+        else:
+            hi_old, lo_old = old_p2, old_p1
+            hi_new, lo_new = new_p2, new_p1
+            hi_index = 1
+
+        mu_hi = hi_old.mu
+        mu_lo = lo_old.mu
+
+        # Relative mu gap (scale-free)
+        gap_pct = 1.0 - (mu_lo / mu_hi)
+        if gap_pct <= 0.0:
+            continue
+        if gap_pct < GAP_TRIGGER:
+            continue
+
+        gap_pct = min(gap_pct, 1.0)
+        scale = _teammate_penalty_scale(gap_pct)
+
+        # Apply to both mu and sigma deltas for the higher player
+        delta_mu = hi_new.mu - hi_old.mu
+        delta_sigma = hi_new.sigma - hi_old.sigma
+
+        adj_mu = hi_old.mu + delta_mu * scale
+        adj_sigma = hi_old.sigma + delta_sigma * scale
+
+        hi_final = model.rating(mu=adj_mu, sigma=adj_sigma)
+        lo_final = lo_new  # unchanged
+
+        # Reassign into new_teams preserving original positional mapping
+        if hi_index == 0:
+            new_teams[i] = [hi_final, lo_final]
+        else:
+            new_teams[i] = [lo_final, hi_final]
+
+# ----------------------------------------------------------------------
+# UNBALANCED LOBBY helpers
+# ----------------------------------------------------------------------
+
+def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
+    """
+    Decide whether any team is in an "unbalanced lobby" and, if so, prepare
+    the adjusted teams list to feed into model.rate.
+
+    Args:
+        model: OpenSkill model instance.
+        teams: List of teams, where each team is a list of Rating objects.
+        logger: Logger or None.
+        gm_team_both_mask: Optional list[bool] indicating whether both teammates
+            are GM+ for each team (same ordering as teams). If provided, only
+            teams with True are eligible for the grace.
+
+    Returns:
+        teams_for_rate: None if no adjustments are required; otherwise a new
+            list of teams whose players may have adjusted mu values for
+            unbalanced teams (and copied ratings for others).
+    """
+    num_teams = len(teams)
+    if num_teams == 0:
+        return None
+
+    # Compute team mu sums and lobby median
+    team_mu_sums = []
+    for team in teams:
+        mu_sum = sum(p.mu for p in team)
+        team_mu_sums.append(mu_sum)
+
+    sorted_mu_sums = sorted(team_mu_sums)
+    mid = len(sorted_mu_sums) // 2
+    if len(sorted_mu_sums) % 2 == 0:
+        lobby_median_team_mu = (sorted_mu_sums[mid - 1] + sorted_mu_sums[mid]) / 2.0
+    else:
+        lobby_median_team_mu = sorted_mu_sums[mid]
+
+    unbalanced_mask = [False] * num_teams
+    any_unbalanced = False
+
+    if lobby_median_team_mu > 0.0:
+        for idx, mu_sum in enumerate(team_mu_sums):
+            # Only consider teams where both players are GM (if mask provided)
+            if gm_team_both_mask is not None and not gm_team_both_mask[idx]:
+                continue
+
+            diff_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
+            if diff_pct >= UNBALANCED_LOBBY_THRESHOLD:
+                unbalanced_mask[idx] = True
+                any_unbalanced = True
+                if logger is not None:
+                    logger.debug(
+                        "Unbalanced lobby detected for team index %d: "
+                        "mu_sum=%.3f lobby_median=%.3f diff_pct=%.3f",
+                        idx, mu_sum, lobby_median_team_mu, diff_pct
+                    )
+    else:
+        # Log when median is invalid, especially if GM+ teams are present
+        if logger is not None and gm_team_both_mask is not None and any(gm_team_both_mask):
+            logger.warning(
+                f"Unbalanced lobby check skipped: lobby_median_team_mu={lobby_median_team_mu} "
+                f"(team_mu_sums={team_mu_sums})"
+            )
+
+    # Fast path: no unbalanced team, skip all adjustment machinery
+    if not any_unbalanced:
+        return None
+
+    # Build adjusted teams for the rate() call.
+    teams_for_rate = []
+    for idx, team_ratings in enumerate(teams):
+        if unbalanced_mask[idx]:
+            adjusted_team = []
+            for r in team_ratings:
+                # Reduction is 12.5% of the gap percentage
+                mu_sum = team_mu_sums[idx]
+                gap_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
+                reduction_pct = gap_pct * UNBALANCED_TEAM_MU_REDUCTION
+                adjusted_mu = r.mu * (1.0 - reduction_pct)
+                adjusted_team.append(model.rating(mu=adjusted_mu, sigma=r.sigma))
+            teams_for_rate.append(adjusted_team)
+        else:
+            # Clone ratings to keep input to model.rate independent
+            teams_for_rate.append([
+                model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
+            ])
+
+    return teams_for_rate
+
+# ----------------------------------------------------------------------
+# Main game-processing function
+# ----------------------------------------------------------------------
+
+def process_game_ratings(
+    model,
+    players,
+    game_id,
+    player_ratings,
+    logger,
+    game_date,
+    gm_set,
+):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
     Assumes exactly 8 teams of 2 players each (16 players total).
@@ -217,22 +341,97 @@ def process_game_ratings(model, players, game_id, player_ratings, logger, game_d
    
     # Prepare teams in order of placing 1 (best) to 8 (worst)
     teams = []
+    gm_team_any = []
+    gm_team_both = []
     for placing in sorted(teams_by_placing.keys()):  # 1 to 8
         team_players = teams_by_placing[placing]
         team_ratings = [player_ratings.get(pid, model.rating()) for pid in team_players]
         teams.append(team_ratings)
-   
+        if gm_set is not None:
+            gm_count = sum(1 for pid in team_players if pid in gm_set)
+            gm_team_any.append(gm_count >= 1)
+            gm_team_both.append(gm_count == 2)
+        else:
+            gm_team_any.append(False)
+            gm_team_both.append(False)
+
     # Ranks: lower number is better (0 for placing 1, 1 for placing 2, ..., 7 for placing 8)
     ranks = list(range(len(teams)))
-   
-    # Rate the teams directly
+
     try:
-        new_teams = model.rate(teams, ranks=ranks)
-        
-        # Skip penalize_boosting if game is within 5 days of split start
+        # Apply sigma-cap to inputs for teams with any GM+
+        rate_input = []
+        for idx, team_ratings in enumerate(teams):
+            if gm_team_any[idx]:
+                r0, r1 = team_ratings
+                # Determine target team sigma (cap lower-μ sigma to higher-μ sigma)
+                if r0.mu >= r1.mu:
+                    s_high = r0.sigma
+                    s_low = r1.sigma
+                else:
+                    s_high = r1.sigma
+                    s_low = r0.sigma
+                if s_low <= s_high:
+                    k = 1.0
+                else:
+                    current_team_sigma = math.hypot(r0.sigma, r1.sigma)
+                    target_team_sigma = math.hypot(s_high, s_high)
+                    if current_team_sigma > 0:
+                        k = target_team_sigma / current_team_sigma
+                    else:
+                        k = 1.0
+                        logger.warning(
+                            f"Game {game_id} team index {idx}: current_team_sigma is 0 "
+                            f"(r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
+                        )
+                if k != 1.0:
+                    rate_input.append([
+                        model.rating(mu=r0.mu, sigma=r0.sigma * k),
+                        model.rating(mu=r1.mu, sigma=r1.sigma * k),
+                    ])
+                else:
+                    rate_input.append([
+                        model.rating(mu=r0.mu, sigma=r0.sigma),
+                        model.rating(mu=r1.mu, sigma=r1.sigma),
+                    ])
+            else:
+                rate_input.append([
+                    model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
+                ])
+
+        # Prepare unbalanced-lobby inputs (if any).
+        adjusted_teams = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_both_mask=gm_team_both)
+        rate_input_final = adjusted_teams if adjusted_teams is not None else rate_input
+        rated_teams = model.rate(rate_input_final, ranks=ranks)
+
+        # Map rating deltas from adjusted inputs back onto the original ratings.
+        new_teams = []
+        for team_idx in range(len(teams)):
+            orig_team = teams[team_idx]
+            old_for_rate = rate_input[team_idx]
+            old_final = rate_input_final[team_idx]
+            new_from_rate = rated_teams[team_idx]
+
+            final_team = []
+            for p_idx in range(len(orig_team)):
+                orig = orig_team[p_idx]
+                old_adj = old_final[p_idx]
+                new_adj = new_from_rate[p_idx]
+
+                delta_mu = new_adj.mu - old_adj.mu
+                delta_sigma = new_adj.sigma - old_adj.sigma
+
+                final_mu = orig.mu + delta_mu
+                final_sigma = orig.sigma + delta_sigma
+
+                final_team.append(model.rating(mu=final_mu, sigma=final_sigma))
+
+            new_teams.append(final_team)
+       
+        # Skip teammate gap penalty if game is within 5 days of split start
         days_since_split_start = (game_date - SPLIT_START_DATE).days
         if days_since_split_start >= 5:
-            anti_boost(model, teams, new_teams, logger)
+            apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=gm_team_any)
        
         # Update player_ratings
         sorted_placings = sorted(teams_by_placing.keys())

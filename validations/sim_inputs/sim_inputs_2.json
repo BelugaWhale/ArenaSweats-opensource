@@ -1,0 +1,362 @@
+{
+  "meta": {
+    "note": "Teams grouped by identical team_placing (two players per placing). Placings map 1..8 directly.",
+    "source_game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+    "source_game_ts": "2025-09-20 00:19:14+00",
+    "rating_pref": "Use pre_mu_mh/pre_sigma_mh if present; else fallback to pre_mu_rh/pre_sigma_rh."
+  },
+  "players": [
+    {
+      "id": "p1",
+      "name": "B0LULU#EUW",
+      "mu": 50.34036604370233,
+      "sigma": 2.050639719921239,
+      "pre_source": "mh",
+      "team_placing": 7
+    },
+    {
+      "id": "p2",
+      "name": "B0mb 1srael#Bunio",
+      "mu": 43.53799769613296,
+      "sigma": 3.91425016814035,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p3",
+      "name": "Bloopey#EUW",
+      "mu": 54.61516980797007,
+      "sigma": 2.451138875342686,
+      "pre_source": "mh",
+      "team_placing": 3
+    },
+    {
+      "id": "p4",
+      "name": "CkiliBu#ckili",
+      "mu": 46.492352406431806,
+      "sigma": 3.6978594392394455,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p5",
+      "name": "Drakania#Drak",
+      "mu": 53.63493659271102,
+      "sigma": 4.544592827548582,
+      "pre_source": "rh",
+      "team_placing": 5
+    },
+    {
+      "id": "p6",
+      "name": "Harendes#EUW",
+      "mu": 52.128571853403976,
+      "sigma": 1.8761509640525353,
+      "pre_source": "mh",
+      "team_placing": 2
+    },
+    {
+      "id": "p7",
+      "name": "Kit#EUW",
+      "mu": 50.13764440713089,
+      "sigma": 2.0581724763957743,
+      "pre_source": "rh",
+      "team_placing": 2
+    },
+    {
+      "id": "p8",
+      "name": "LE SERRAFIM BIAS#EUW",
+      "mu": 51.50860124753663,
+      "sigma": 2.1619541194037355,
+      "pre_source": "mh",
+      "team_placing": 4
+    },
+    {
+      "id": "p9",
+      "name": "LFT Tsumitase#FUTA",
+      "mu": 50.391928897972996,
+      "sigma": 3.4288023455251015,
+      "pre_source": "rh",
+      "team_placing": 6
+    },
+    {
+      "id": "p10",
+      "name": "MadMango89#EUW",
+      "mu": 61.207734411385125,
+      "sigma": 1.7358510980631363,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p11",
+      "name": "Nyashka aka Ruby#EUW",
+      "mu": 52.113707843609575,
+      "sigma": 1.7526638793266687,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p12",
+      "name": "Oliwka iwnl#kitty",
+      "mu": 55.84343629694832,
+      "sigma": 2.7032360499833894,
+      "pre_source": "rh",
+      "team_placing": 8
+    },
+    {
+      "id": "p13",
+      "name": "Russia#0510",
+      "mu": 42.731195211237115,
+      "sigma": 3.459320261516874,
+      "pre_source": "rh",
+      "team_placing": 3
+    },
+    {
+      "id": "p14",
+      "name": "Serzh9#EUW",
+      "mu": 53.808244399432056,
+      "sigma": 2.089610235667736,
+      "pre_source": "mh",
+      "team_placing": 7
+    },
+    {
+      "id": "p15",
+      "name": "Thetawave#EUW",
+      "mu": 49.45026459501216,
+      "sigma": 1.944335237566048,
+      "pre_source": "mh",
+      "team_placing": 4
+    },
+    {
+      "id": "p16",
+      "name": "Żuraw Apprentice#ML4",
+      "mu": 47.94532916409993,
+      "sigma": 2.4930450095217007,
+      "pre_source": "rh",
+      "team_placing": 8
+    }
+  ],
+  "teams": [
+    [
+      "p10",
+      "p11"
+    ],
+    [
+      "p6",
+      "p7"
+    ],
+    [
+      "p3",
+      "p13"
+    ],
+    [
+      "p8",
+      "p15"
+    ],
+    [
+      "p4",
+      "p5"
+    ],
+    [
+      "p2",
+      "p9"
+    ],
+    [
+      "p1",
+      "p14"
+    ],
+    [
+      "p12",
+      "p16"
+    ]
+  ],
+  "placings": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "targets": {
+    "p1": {
+      "mu": 49.55471218251599,
+      "sigma": 2.04818055449882
+    },
+    "p3": {
+      "mu": 55.44050852413297,
+      "sigma": 2.442939322172472
+    },
+    "p6": {
+      "mu": 52.705006251429914,
+      "sigma": 1.8752069133808855
+    },
+    "p8": {
+      "mu": 51.69984646390165,
+      "sigma": 2.1589889916776186
+    },
+    "p10": {
+      "mu": 61.642789120364334,
+      "sigma": 1.736203950646862
+    },
+    "p11": {
+      "mu": 52.55721143622598,
+      "sigma": 1.7529493714471844
+    },
+    "p14": {
+      "mu": 52.992495242163194,
+      "sigma": 2.0868785364296674
+    },
+    "p15": {
+      "mu": 49.605000891367,
+      "sigma": 1.9427945037887895
+    }
+  },
+  "target_games": [
+    {
+      "player_id": "p1",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 7,
+      "rating_change": -0.78565386118634,
+      "pregame_mu": 50.34036604370233,
+      "pregame_sigma": 2.050639719921239
+    },
+    {
+      "player_id": "p2",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 6,
+      "rating_change": null,
+      "pregame_mu": 43.53799769613296,
+      "pregame_sigma": 3.91425016814035
+    },
+    {
+      "player_id": "p3",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 3,
+      "rating_change": 0.8253387161629036,
+      "pregame_mu": 54.61516980797007,
+      "pregame_sigma": 2.451138875342686
+    },
+    {
+      "player_id": "p4",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 5,
+      "rating_change": null,
+      "pregame_mu": 46.492352406431806,
+      "pregame_sigma": 3.6978594392394455
+    },
+    {
+      "player_id": "p5",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 5,
+      "rating_change": null,
+      "pregame_mu": 53.63493659271102,
+      "pregame_sigma": 4.544592827548582
+    },
+    {
+      "player_id": "p6",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 2,
+      "rating_change": 0.5764343980259383,
+      "pregame_mu": 52.128571853403976,
+      "pregame_sigma": 1.8761509640525353
+    },
+    {
+      "player_id": "p7",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 2,
+      "rating_change": null,
+      "pregame_mu": 50.13764440713089,
+      "pregame_sigma": 2.0581724763957743
+    },
+    {
+      "player_id": "p8",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 4,
+      "rating_change": 0.19124521636501868,
+      "pregame_mu": 51.50860124753663,
+      "pregame_sigma": 2.1619541194037355
+    },
+    {
+      "player_id": "p9",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 6,
+      "rating_change": null,
+      "pregame_mu": 50.391928897972996,
+      "pregame_sigma": 3.4288023455251015
+    },
+    {
+      "player_id": "p10",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 1,
+      "rating_change": 0.4350547089792087,
+      "pregame_mu": 61.207734411385125,
+      "pregame_sigma": 1.7358510980631363
+    },
+    {
+      "player_id": "p11",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 1,
+      "rating_change": 0.44350359261640193,
+      "pregame_mu": 52.113707843609575,
+      "pregame_sigma": 1.7526638793266687
+    },
+    {
+      "player_id": "p12",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 8,
+      "rating_change": null,
+      "pregame_mu": 55.84343629694832,
+      "pregame_sigma": 2.7032360499833894
+    },
+    {
+      "player_id": "p13",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 3,
+      "rating_change": null,
+      "pregame_mu": 42.731195211237115,
+      "pregame_sigma": 3.459320261516874
+    },
+    {
+      "player_id": "p14",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 7,
+      "rating_change": -0.8157491572688613,
+      "pregame_mu": 53.808244399432056,
+      "pregame_sigma": 2.089610235667736
+    },
+    {
+      "player_id": "p15",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 4,
+      "rating_change": 0.15473629635484087,
+      "pregame_mu": 49.45026459501216,
+      "pregame_sigma": 1.944335237566048
+    },
+    {
+      "player_id": "p16",
+      "game_id": "KqFazGhft1V27ZWrQUdPs9VqL8UaFfw_fNDuKo0S-3Q=",
+      "game_ts": "2025-09-20 00:19:14+00",
+      "placing": 8,
+      "rating_change": null,
+      "pregame_mu": 47.94532916409993,
+      "pregame_sigma": 2.4930450095217007
+    }
+  ]
+}
