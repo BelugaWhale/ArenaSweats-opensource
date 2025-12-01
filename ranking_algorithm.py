@@ -326,14 +326,14 @@ def process_game_ratings(
         game_date: datetime object representing when the game was played
 
     Returns:
-        tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> (gap_pct, gap_scale, sigma_cap_scale, unbalanced_reduction_pct))
+        tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
 
         Modifiers dictionary contains per-player tracking values:
-        - gap_pct: Relative mu gap (0.0-1.0) for high-mu player in a penalized team, 0.0 otherwise
-        - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no penalty
-        - sigma_cap_scale: Multiplier applied to sigma for GM+ teams (typically 0.0-1.0)
-          Note: This is tracked for all players; value is always 1.0 for non-GM teams
-        - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise
+        - gap_pct: Relative mu gap (0.0-1.0) for high-mu player in a penalized team, 0.0 otherwise.
+        - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no penalty.
+        - sigma_cap_scale: Multiplier applied to sigma for GM+ teams (typically 0.0-1.0).
+          Note: This is tracked for all players; value is always 1.0 for non-GM teams.
+        - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
     """
     
     # Verify exactly 16 players
@@ -476,12 +476,12 @@ def process_game_ratings(
             player_ratings[team_players[0]] = new_team[0]
             player_ratings[team_players[1]] = new_team[1]
             for pid in team_players:
-                modifiers[pid] = (
-                    gap_pct_by_pid.get(pid, 0.0),
-                    gap_scale_by_pid.get(pid, 1.0),
-                    sigma_cap_scale_by_pid.get(pid, 1.0),
-                    unbalanced_reductions[i]  # Always a list at this point (set at line 427)
-                )
+                modifiers[pid] = {
+                    "gap_pct": gap_pct_by_pid.get(pid, 0.0),
+                    "gap_scale": gap_scale_by_pid.get(pid, 1.0),
+                    "sigma_cap_scale": sigma_cap_scale_by_pid.get(pid, 1.0),
+                    "unbalanced_reduction_pct": unbalanced_reductions[i]  # Always a list at this point (set at line 427)
+                }
 
         return True, player_ratings, modifiers
 
