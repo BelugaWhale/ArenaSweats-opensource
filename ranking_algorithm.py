@@ -148,7 +148,7 @@ def _teammate_penalty_scale(gap_pct: float) -> float:
     # Clamp to safety range
     return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
 
-def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None):
+def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None):
     """
     Post-process rating updates to dampen gains/losses for the higher-mu player
     in teams with large mu gaps, but only when that player is "high rated".
@@ -182,6 +182,14 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
 
         gap_pct = min(gap_pct, 1.0)
         scale = _teammate_penalty_scale(gap_pct)
+        hi_pid = None
+        if team_player_ids is not None:
+            ids = team_player_ids[i]
+            hi_pid = ids[0] if hi_index == 0 else ids[1]
+        if hi_pid is not None and gap_pct_by_pid is not None:
+            gap_pct_by_pid[hi_pid] = gap_pct
+        if hi_pid is not None and gap_scale_by_pid is not None:
+            gap_scale_by_pid[hi_pid] = scale
 
         # Apply to both mu and sigma deltas for the higher player
         delta_mu = hi_new.mu - hi_old.mu
@@ -223,7 +231,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
     """
     num_teams = len(teams)
     if num_teams == 0:
-        return None
+        return None, None
 
     # Compute team mu sums and lobby median
     team_mu_sums = []
@@ -267,10 +275,11 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
 
     # Fast path: no unbalanced team, skip all adjustment machinery
     if not any_unbalanced:
-        return None
+        return None, None
 
     # Build adjusted teams for the rate() call.
     teams_for_rate = []
+    reductions = [0.0] * num_teams
     for idx, team_ratings in enumerate(teams):
         if unbalanced_mask[idx]:
             adjusted_team = []
@@ -279,6 +288,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
                 mu_sum = team_mu_sums[idx]
                 gap_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
                 reduction_pct = gap_pct * UNBALANCED_TEAM_MU_REDUCTION
+                reductions[idx] = reduction_pct
                 adjusted_mu = r.mu * (1.0 - reduction_pct)
                 adjusted_team.append(model.rating(mu=adjusted_mu, sigma=r.sigma))
             teams_for_rate.append(adjusted_team)
@@ -288,7 +298,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
                 model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
             ])
 
-    return teams_for_rate
+    return teams_for_rate, reductions
 
 # ----------------------------------------------------------------------
 # Main game-processing function
@@ -306,7 +316,7 @@ def process_game_ratings(
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
     Assumes exactly 8 teams of 2 players each (16 players total).
-   
+
     Args:
         model: ThurstoneMostellerFull model instance
         players: List of (player_id, team_placing) tuples
@@ -314,39 +324,48 @@ def process_game_ratings(
         player_ratings: Dictionary of player_id -> Rating
         logger: Logger instance
         game_date: datetime object representing when the game was played
-   
+
     Returns:
-        tuple: (success: bool, updated_player_ratings: dict)
+        tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> (gap_pct, gap_scale, sigma_cap_scale, unbalanced_reduction_pct))
+
+        Modifiers dictionary contains per-player tracking values:
+        - gap_pct: Relative mu gap (0.0-1.0) for high-mu player in a penalized team, 0.0 otherwise
+        - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no penalty
+        - sigma_cap_scale: Multiplier applied to sigma for GM+ teams (typically 0.0-1.0)
+          Note: This is tracked for all players; value is always 1.0 for non-GM teams
+        - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise
     """
     
     # Verify exactly 16 players
     if len(players) != 16:
         logger.warning(f"Game {game_id} has {len(players)} players, expected 16")
-        return False, player_ratings
-   
+        return False, player_ratings, {}
+
     # Group players by team_placing (1-8)
     teams_by_placing = defaultdict(list)
     for player_id, team_placing in players:
         teams_by_placing[team_placing].append(player_id)
-   
+
     # Verify exactly 8 teams of 2 players each
     if len(teams_by_placing) != 8:
         logger.warning(f"Game {game_id} has {len(teams_by_placing)} teams, expected 8")
-        return False, player_ratings
-   
+        return False, player_ratings, {}
+
     for placing, team_players in teams_by_placing.items():
         if len(team_players) != 2:
             logger.warning(f"Game {game_id} team placing {placing} has {len(team_players)} players, expected 2")
-            return False, player_ratings
-   
+            return False, player_ratings, {}
+
     # Prepare teams in order of placing 1 (best) to 8 (worst)
     teams = []
     gm_team_any = []
     gm_team_both = []
+    team_player_ids = []
     for placing in sorted(teams_by_placing.keys()):  # 1 to 8
         team_players = teams_by_placing[placing]
         team_ratings = [player_ratings.get(pid, model.rating()) for pid in team_players]
         teams.append(team_ratings)
+        team_player_ids.append(team_players)
         if gm_set is not None:
             gm_count = sum(1 for pid in team_players if pid in gm_set)
             gm_team_any.append(gm_count >= 1)
@@ -355,16 +374,15 @@ def process_game_ratings(
             gm_team_any.append(False)
             gm_team_both.append(False)
 
-    # Ranks: lower number is better (0 for placing 1, 1 for placing 2, ..., 7 for placing 8)
     ranks = list(range(len(teams)))
 
     try:
-        # Apply sigma-cap to inputs for teams with any GM+
         rate_input = []
+        sigma_cap_scale_by_pid = {}
         for idx, team_ratings in enumerate(teams):
+            t_pids = team_player_ids[idx]
             if gm_team_any[idx]:
                 r0, r1 = team_ratings
-                # Determine target team sigma (cap lower-μ sigma to higher-μ sigma)
                 if r0.mu >= r1.mu:
                     s_high = r0.sigma
                     s_low = r1.sigma
@@ -384,6 +402,8 @@ def process_game_ratings(
                             f"Game {game_id} team index {idx}: current_team_sigma is 0 "
                             f"(r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
                         )
+                sigma_cap_scale_by_pid[t_pids[0]] = k
+                sigma_cap_scale_by_pid[t_pids[1]] = k
                 if k != 1.0:
                     rate_input.append([
                         model.rating(mu=r0.mu, sigma=r0.sigma * k),
@@ -395,20 +415,23 @@ def process_game_ratings(
                         model.rating(mu=r1.mu, sigma=r1.sigma),
                     ])
             else:
+                sigma_cap_scale_by_pid[t_pids[0]] = 1.0
+                sigma_cap_scale_by_pid[t_pids[1]] = 1.0
                 rate_input.append([
                     model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
                 ])
 
-        # Prepare unbalanced-lobby inputs (if any).
-        adjusted_teams = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_both_mask=gm_team_both)
-        rate_input_final = adjusted_teams if adjusted_teams is not None else rate_input
+        adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_both_mask=gm_team_both)
+        if adjusted_teams is None:
+            rate_input_final = rate_input
+            unbalanced_reductions = [0.0] * len(teams)
+        else:
+            rate_input_final = adjusted_teams
         rated_teams = model.rate(rate_input_final, ranks=ranks)
 
-        # Map rating deltas from adjusted inputs back onto the original ratings.
         new_teams = []
         for team_idx in range(len(teams)):
             orig_team = teams[team_idx]
-            old_for_rate = rate_input[team_idx]
             old_final = rate_input_final[team_idx]
             new_from_rate = rated_teams[team_idx]
 
@@ -427,22 +450,41 @@ def process_game_ratings(
                 final_team.append(model.rating(mu=final_mu, sigma=final_sigma))
 
             new_teams.append(final_team)
-       
-        # Skip teammate gap penalty if game is within 5 days of split start
+
         days_since_split_start = (game_date - SPLIT_START_DATE).days
+        gap_pct_by_pid = {}
+        gap_scale_by_pid = {}
         if days_since_split_start >= 5:
-            apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=gm_team_any)
-       
-        # Update player_ratings
+            apply_teammate_gap_penalty(
+                model,
+                teams,
+                new_teams,
+                logger,
+                gm_team_any=gm_team_any,
+                team_player_ids=team_player_ids,
+                gap_pct_by_pid=gap_pct_by_pid,
+                gap_scale_by_pid=gap_scale_by_pid,
+            )
+
         sorted_placings = sorted(teams_by_placing.keys())
+        modifiers = {}
+        # Note: Index i in the loop below corresponds to team position in teams/new_teams/unbalanced_reductions
+        # because all three were built by iterating sorted(teams_by_placing.keys()) at line 364
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
             new_team = new_teams[i]
             player_ratings[team_players[0]] = new_team[0]
             player_ratings[team_players[1]] = new_team[1]
-        
-        return True, player_ratings
-   
+            for pid in team_players:
+                modifiers[pid] = (
+                    gap_pct_by_pid.get(pid, 0.0),
+                    gap_scale_by_pid.get(pid, 1.0),
+                    sigma_cap_scale_by_pid.get(pid, 1.0),
+                    unbalanced_reductions[i]  # Always a list at this point (set at line 427)
+                )
+
+        return True, player_ratings, modifiers
+
     except Exception as e:
         logger.error(f"Failed to update ratings for game {game_id}: {e}")
-        return False, player_ratings
+        return False, player_ratings, {}
