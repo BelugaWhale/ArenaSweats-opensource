@@ -28,7 +28,7 @@ GAP_SATURATION = 0.65
 # UNBALANCED_TEAM_MU_REDUCTION before calling model.rate. After rating
 # updates we apply the resulting delta mu/sigma on top of the original
 # (unreduced) mu/sigma.
-UNBALANCED_LOBBY_GRACE_ENABLED = False
+UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_LOBBY_THRESHOLD = 0.10       # 10% above lobby median team mu
 UNBALANCED_TEAM_MU_REDUCTION = 0.125    # Apply 12.5% of the gap as a temporary mu reduction
 
