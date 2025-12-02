@@ -28,6 +28,7 @@ GAP_SATURATION = 0.65
 # UNBALANCED_TEAM_MU_REDUCTION before calling model.rate. After rating
 # updates we apply the resulting delta mu/sigma on top of the original
 # (unreduced) mu/sigma.
+UNBALANCED_LOBBY_GRACE_ENABLED = False
 UNBALANCED_LOBBY_THRESHOLD = 0.10       # 10% above lobby median team mu
 UNBALANCED_TEAM_MU_REDUCTION = 0.125    # Apply 12.5% of the gap as a temporary mu reduction
 
@@ -229,6 +230,9 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
             list of teams whose players may have adjusted mu values for
             unbalanced teams (and copied ratings for others).
     """
+    if not UNBALANCED_LOBBY_GRACE_ENABLED:
+        return None, None
+
     num_teams = len(teams)
     if num_teams == 0:
         return None, None
