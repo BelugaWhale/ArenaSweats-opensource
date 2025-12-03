@@ -10,27 +10,22 @@ SPLIT_START_DATE = datetime(2025, 8, 27, tzinfo=timezone.utc)
 # Global configuration for teammate gap penalty.
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
 #                         higher player's mu/sigma delta once fully penalised.
-# PENALTY_CURVE_K: power exponent controlling how quickly the penalty ramps
-#                  up between trigger and saturation.
 # GAP_TRIGGER: relative mu gap (0-1) at which the penalty starts to apply.
 # GAP_SATURATION: relative mu gap (0-1) at which we are fully at
 #                 PENALTY_MIN_MULTIPLIER and remain flat afterwards.
 PENALTY_MIN_MULTIPLIER = 0.05
-PENALTY_CURVE_K = 2
-GAP_TRIGGER = 0
-GAP_SATURATION = 0.65
+GAP_TRIGGER = 0.10
+GAP_SATURATION = 0.50
 
 # Unbalanced lobby configuration.
-# A team is considered "unbalanced" if its average mu is above the lobby's
-# average team mu by at least UNBALANCED_LOBBY_THRESHOLD (fractional).
-# The check is only performed for teams where both players are GM+.
-# For such unbalanced teams, we temporarily reduce their mu by
-# UNBALANCED_TEAM_MU_REDUCTION before calling model.rate. After rating
-# updates we apply the resulting delta mu/sigma on top of the original
-# (unreduced) mu/sigma.
+# A team is considered "unbalanced" if its mu sum is above the lobby's
+# median team mu (any positive gap). The check is only performed for teams
+# where both players are GM+. For such teams we temporarily reduce their mu by
+# UNBALANCED_TEAM_MU_REDUCTION times the fractional gap before calling model.rate.
+# After rating updates we apply the resulting delta mu/sigma on top of the
+# original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
-UNBALANCED_LOBBY_THRESHOLD = 0.10       # 10% above lobby median team mu
-UNBALANCED_TEAM_MU_REDUCTION = 0.125    # Apply 12.5% of the gap as a temporary mu reduction
+UNBALANCED_TEAM_MU_REDUCTION = 0.3125   # Apply 31.25% of the gap as a temporary mu reduction
 
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
@@ -136,15 +131,9 @@ def _teammate_penalty_scale(gap_pct: float) -> float:
     if gap_pct >= GAP_SATURATION:
         return PENALTY_MIN_MULTIPLIER
 
-    # Normalise gap from [GAP_TRIGGER, GAP_SATURATION] -> [0, 1]
-    x = (gap_pct - GAP_TRIGGER) / (GAP_SATURATION - GAP_TRIGGER)
-
-    # Power curve:
-    #   x in [0,1]
-    #   scale(0) = 1.0 (no penalty at trigger)
-    #   scale(1) = PENALTY_MIN_MULTIPLIER (fully penalised at saturation gap)
-    #   Larger PENALTY_CURVE_K => flatter near trigger, steeper near saturation.
-    scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * (x ** PENALTY_CURVE_K)
+    # Linear drop between trigger and saturation.
+    progress = (gap_pct - GAP_TRIGGER) / (GAP_SATURATION - GAP_TRIGGER)
+    scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * progress
 
     # Clamp to safety range
     return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
@@ -173,11 +162,14 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
 
         mu_hi = hi_old.mu
         mu_lo = lo_old.mu
+        if mu_hi <= 0.0:
+            continue
 
         # Relative mu gap (scale-free)
         gap_pct = 1.0 - (mu_lo / mu_hi)
         if gap_pct <= 0.0:
             continue
+
         if gap_pct < GAP_TRIGGER:
             continue
 
@@ -260,7 +252,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
                 continue
 
             diff_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
-            if diff_pct >= UNBALANCED_LOBBY_THRESHOLD:
+            if diff_pct > 0.0:
                 unbalanced_mask[idx] = True
                 any_unbalanced = True
                 if logger is not None:
@@ -288,9 +280,9 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         if unbalanced_mask[idx]:
             adjusted_team = []
             for r in team_ratings:
-                # Reduction is 12.5% of the gap percentage
+                # Reduction is 31.25% of the gap percentage
                 mu_sum = team_mu_sums[idx]
-                gap_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
+                gap_pct = max(0.0, (mu_sum - lobby_median_team_mu) / lobby_median_team_mu)
                 reduction_pct = gap_pct * UNBALANCED_TEAM_MU_REDUCTION
                 reductions[idx] = reduction_pct
                 adjusted_mu = r.mu * (1.0 - reduction_pct)
@@ -333,7 +325,7 @@ def process_game_ratings(
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
 
         Modifiers dictionary contains per-player tracking values:
-        - gap_pct: Relative mu gap (0.0-1.0) for high-mu player in a penalized team, 0.0 otherwise.
+        - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a penalized team, 0.0 otherwise.
         - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no penalty.
         - sigma_cap_scale: Multiplier applied to sigma for GM+ teams (typically 0.0-1.0).
           Note: This is tracked for all players; value is always 1.0 for non-GM teams.
