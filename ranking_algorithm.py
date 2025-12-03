@@ -15,7 +15,7 @@ SPLIT_START_DATE = datetime(2025, 8, 27, tzinfo=timezone.utc)
 #                 PENALTY_MIN_MULTIPLIER and remain flat afterwards.
 PENALTY_MIN_MULTIPLIER = 0.05
 GAP_TRIGGER = 0.10
-GAP_SATURATION = 0.50
+GAP_SATURATION = 0.55
 
 # Unbalanced lobby configuration.
 # A team is considered "unbalanced" if its mu sum is above the lobby's
@@ -25,7 +25,7 @@ GAP_SATURATION = 0.50
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
-UNBALANCED_TEAM_MU_REDUCTION = 0.3125   # Apply 31.25% of the gap as a temporary mu reduction
+UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 31.25% of the gap as a temporary mu reduction
 
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
