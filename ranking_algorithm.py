@@ -114,7 +114,7 @@ def instantiate_rating_model():
     - https://openskill.me/en/stable/models/openskill.models.weng_lin.thurstone_mosteller_full.html
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    model = ThurstoneMostellerFull(beta=(25/6) * 4, tau=(25/300) * 8)
+    model = ThurstoneMostellerFull(beta=(25/6) * 4, tau=(25/300) * 4)
 
     return model
 
