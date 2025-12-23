@@ -114,7 +114,7 @@ def instantiate_rating_model():
     - https://openskill.me/en/stable/models/openskill.models.weng_lin.thurstone_mosteller_full.html
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    model = ThurstoneMostellerFull(beta=(25/6) * 4, tau=(25/300))
+    model = ThurstoneMostellerFull(beta=(25/6) * 4, tau=(25/300) * 3)
 
     return model
 
@@ -199,6 +199,68 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
             new_teams[i] = [hi_final, lo_final]
         else:
             new_teams[i] = [lo_final, hi_final]
+
+# ----------------------------------------------------------------------
+# SIGMA CAP helper
+# ----------------------------------------------------------------------
+
+def apply_sigma_cap(model, teams, gm_team_any, team_player_ids, logger):
+    """
+    Apply the sigma cap to GM+ teams and build the list passed to model.rate.
+
+    Args:
+        model: OpenSkill model instance.
+        teams: List of teams (lists of Rating objects) in placing order.
+        gm_team_any: List[bool] indicating whether each team has at least one GM.
+        team_player_ids: List of [pid0, pid1] matching the order of teams.
+        logger: Logger or None for warnings.
+
+    Returns:
+        tuple: (rate_input, sigma_cap_scale_by_pid)
+    """
+    rate_input = []
+    sigma_cap_scale_by_pid = {}
+
+    for idx, team_ratings in enumerate(teams):
+        t_pids = team_player_ids[idx] if team_player_ids else [None, None]
+        has_gm = gm_team_any[idx] if gm_team_any else False
+
+        if has_gm:
+            r0, r1 = team_ratings
+            if r0.mu >= r1.mu:
+                s_high = r0.sigma
+                s_low = r1.sigma
+            else:
+                s_high = r1.sigma
+                s_low = r0.sigma
+            if s_low <= s_high:
+                k = 1.0
+            else:
+                current_team_sigma = math.hypot(r0.sigma, r1.sigma)
+                target_team_sigma = math.hypot(s_high, s_high)
+                if current_team_sigma > 0:
+                    k = target_team_sigma / current_team_sigma
+                else:
+                    k = 1.0
+                    if logger is not None:
+                        logger.warning(
+                            f"Sigma cap skipped for team index {idx}: "
+                            f"current_team_sigma is 0 (r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
+                        )
+            sigma_cap_scale_by_pid[t_pids[0]] = k
+            sigma_cap_scale_by_pid[t_pids[1]] = k
+            rate_input.append([
+                model.rating(mu=r0.mu, sigma=r0.sigma * k),
+                model.rating(mu=r1.mu, sigma=r1.sigma * k),
+            ])
+        else:
+            sigma_cap_scale_by_pid[t_pids[0]] = 1.0
+            sigma_cap_scale_by_pid[t_pids[1]] = 1.0
+            rate_input.append([
+                model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
+            ])
+
+    return rate_input, sigma_cap_scale_by_pid
 
 # ----------------------------------------------------------------------
 # UNBALANCED LOBBY helpers
@@ -373,49 +435,13 @@ def process_game_ratings(
     ranks = list(range(len(teams)))
 
     try:
-        rate_input = []
-        sigma_cap_scale_by_pid = {}
-        for idx, team_ratings in enumerate(teams):
-            t_pids = team_player_ids[idx]
-            if gm_team_any[idx]:
-                r0, r1 = team_ratings
-                if r0.mu >= r1.mu:
-                    s_high = r0.sigma
-                    s_low = r1.sigma
-                else:
-                    s_high = r1.sigma
-                    s_low = r0.sigma
-                if s_low <= s_high:
-                    k = 1.0
-                else:
-                    current_team_sigma = math.hypot(r0.sigma, r1.sigma)
-                    target_team_sigma = math.hypot(s_high, s_high)
-                    if current_team_sigma > 0:
-                        k = target_team_sigma / current_team_sigma
-                    else:
-                        k = 1.0
-                        logger.warning(
-                            f"Game {game_id} team index {idx}: current_team_sigma is 0 "
-                            f"(r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
-                        )
-                sigma_cap_scale_by_pid[t_pids[0]] = k
-                sigma_cap_scale_by_pid[t_pids[1]] = k
-                if k != 1.0:
-                    rate_input.append([
-                        model.rating(mu=r0.mu, sigma=r0.sigma * k),
-                        model.rating(mu=r1.mu, sigma=r1.sigma * k),
-                    ])
-                else:
-                    rate_input.append([
-                        model.rating(mu=r0.mu, sigma=r0.sigma),
-                        model.rating(mu=r1.mu, sigma=r1.sigma),
-                    ])
-            else:
-                sigma_cap_scale_by_pid[t_pids[0]] = 1.0
-                sigma_cap_scale_by_pid[t_pids[1]] = 1.0
-                rate_input.append([
-                    model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
-                ])
+        rate_input, sigma_cap_scale_by_pid = apply_sigma_cap(
+            model,
+            teams,
+            gm_team_any,
+            team_player_ids,
+            logger,
+        )
 
         adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_both_mask=gm_team_both)
         if adjusted_teams is None:
