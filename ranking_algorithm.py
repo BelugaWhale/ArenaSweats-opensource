@@ -42,20 +42,14 @@ REFERENCES:
 - https://github.com/OpenDebates/openskill.py (Note: This is a fork; original is at https://github.com/vivekjoshy/openskill.py)
 '''
 
-def calculate_rating(rating, games_played):
-    """Calculate the final rating from mu, sigma and games played"""
+def calculate_rating(rating):
+    """Calculate the final rating from mu and sigma"""
     """
     Microsoft research recommends using mu-3*sigma as the "conservative skill estimate" for TrueSkill, and this is commonly applied in similar systems like OpenSkill.
     https://www.microsoft.com/en-us/research/project/trueskill-ranking-system/
     """
     base_rating = (rating.mu - 3 * rating.sigma) * 75
-    """
-    MODIFICATION to the algorithm. (THE RAMP UP)
-    Concerns were raised about players at the top of the leaderboard with low games played. Players have also been shown to fluctuate in mu a lot while their sigma is high. A player's sigma is highest when they are new to the system.
-    Practically this has lead to a few players having not many games played and a very high skill estimate. To resolve this a scaling factor has been applied. The player's skill estimate ramps up, starting at 50% of the rating at 0 games played, and 100% of the rating at 40 games played. This scales linearly.
-    """
-    scaling_factor = 0.5 + min(games_played, 40) / 40 * 0.5
-    return round(base_rating * scaling_factor)
+    return round(base_rating)
 
 def instantiate_rating_model():
     """
@@ -114,7 +108,7 @@ def instantiate_rating_model():
     - https://openskill.me/en/stable/models/openskill.models.weng_lin.thurstone_mosteller_full.html
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    model = ThurstoneMostellerFull(sigma=(25/5), beta=(25/6) * 2.5, tau=(25/300) * 4)
+    model = ThurstoneMostellerFull(sigma=(25/4.5), beta=(25/6) * 4, tau=(25/300) * 2.5)
 
     return model
 
