@@ -4,8 +4,8 @@ from openskill.models import ThurstoneMostellerFull
 from datetime import datetime, timezone
 
 # Constants
-RANK_SPLIT = "2025 Split 3"
-SPLIT_START_DATE = datetime(2025, 8, 27, tzinfo=timezone.utc)
+RANK_SPLIT = "2026 Preseason"
+SPLIT_START_DATE = datetime(2026, 1, 8, tzinfo=timezone.utc)
 
 # Global configuration for teammate gap penalty.
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the

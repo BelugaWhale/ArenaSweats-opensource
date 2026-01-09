@@ -57,7 +57,7 @@ def _clone_rating(model, rating_obj):
 # ----------------------------------------------------------------------
 # INPUTS & VALIDATION
 # ----------------------------------------------------------------------
-default_path = os.path.join(_SCRIPT_DIR, "sim_inputs", "sim_inputs_25.json")
+default_path = os.path.join(_SCRIPT_DIR, "sim_inputs", "sim_inputs_28.json")
 if not os.path.exists(default_path):
     raise FileNotFoundError(f"Required sim input not found: {default_path}")
 
@@ -129,7 +129,7 @@ if used != set(ids):
 # ----------------------------------------------------------------------
 # BASELINE (NO SPECIAL PENALTIES UNLESS RECORDED IN INPUTS)
 # ----------------------------------------------------------------------
-model = ThurstoneMostellerFull(beta=(25 / 6) * 4, tau=(25 / 300))
+model = ThurstoneMostellerFull(sigma=(25 / 6), beta=(25 / 6) * 2.5, tau=(25 / 300) * 3)
 
 before_ratings = {}
 for p in players:
@@ -522,6 +522,8 @@ headers_sigma = [
     "sigma_cap_scale",
 ]
 rows_sigma = []
+sigma_rating_change_by_pid = {}
+sigma_rating_diff_by_pid = {}
 
 for place, team in placing_with_team:
     for idx, pid in enumerate(team):
@@ -538,6 +540,8 @@ for place, team in placing_with_team:
 
         delta_rating = post_player_rating - pre_player_rating
         delta_diff = delta_rating - baseline_rating_change[pid]
+        sigma_rating_change_by_pid[pid] = delta_rating
+        sigma_rating_diff_by_pid[pid] = delta_diff
 
         if idx == 0:
             mu_t, sg_t, rt_t = scaled_pre_team[place]
@@ -624,6 +628,8 @@ headers_gap = [
     "mu_gap",
 ]
 rows_gap = []
+gap_rating_change_by_pid = {}
+gap_rating_diff_by_pid = {}
 
 for place, team in placing_with_team:
     r0 = before_ratings[team[0]]
@@ -657,6 +663,8 @@ for place, team in placing_with_team:
 
         delta_rating = post_player_gap_rating - pre_player_rating
         delta_diff = delta_rating - baseline_rating_change[pid]
+        gap_rating_change_by_pid[pid] = delta_rating
+        gap_rating_diff_by_pid[pid] = delta_diff
 
         if idx == 0:
             mu_pre_t, sg_pre_t, rt_pre_t = pre_team[place]
@@ -796,6 +804,8 @@ headers_ub = [
     "lobby_diff",
 ]
 rows_ub = []
+ub_rating_change_by_pid = {}
+ub_rating_diff_by_pid = {}
 
 for place, team in placing_with_team:
     team_mu_sum = team_mu_sum_by_place[place]
@@ -826,6 +836,8 @@ for place, team in placing_with_team:
 
         delta_rating = post_player_ub_rating - pre_player_rating
         delta_diff = delta_rating - baseline_rating_change[pid]
+        ub_rating_change_by_pid[pid] = delta_rating
+        ub_rating_diff_by_pid[pid] = delta_diff
 
         if idx == 0:
             mu_pre_t, sg_pre_t, rt_pre_t = ub_pre_team[place]
@@ -879,22 +891,8 @@ else:
 # ----------------------------------------------------------------------
 # COMBINED STACKED-PENALTY table (sigma-cap -> unbalanced lobby -> gap penalty)
 # ----------------------------------------------------------------------
-sigma_stage_after = run_pipeline(apply_sigma_cap=True, apply_unbalanced=False, apply_gap_penalty=False)
-unbalanced_stage_after = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=False)
-gap_stage_after = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=True)
-
-sigma_stage_change = {
-    pid: _simple_rating(sigma_stage_after[pid].mu, sigma_stage_after[pid].sigma)
-    - _simple_rating(before_ratings[pid].mu, before_ratings[pid].sigma)
-    for pid in before_ratings
-}
-unbalanced_stage_change = {
-    pid: _simple_rating(unbalanced_stage_after[pid].mu, unbalanced_stage_after[pid].sigma)
-    - _simple_rating(before_ratings[pid].mu, before_ratings[pid].sigma)
-    for pid in before_ratings
-}
-gap_stage_change = {
-    pid: _simple_rating(gap_stage_after[pid].mu, gap_stage_after[pid].sigma)
+final_rating_change_by_pid = {
+    pid: _simple_rating(production_after_ratings[pid].mu, production_after_ratings[pid].sigma)
     - _simple_rating(before_ratings[pid].mu, before_ratings[pid].sigma)
     for pid in before_ratings
 }
@@ -908,6 +906,7 @@ headers_combo = [
     "unbalanced_grace_effect",
     "rating_change_after_unbalanced",
     "team_gap_effect",
+    "rating_change_after_gap",
     "final_rating_change",
 ]
 rows_combo = []
@@ -917,13 +916,13 @@ for place, team in placing_with_team:
         name = names_map.get(pid) or pid
 
         base_change = baseline_rating_change[pid]
-        sigma_change = sigma_stage_change[pid]
-        unbalanced_change = unbalanced_stage_change[pid]
-        gap_change = gap_stage_change[pid]
-
-        sigma_penalty = sigma_change - base_change
-        unbalanced_penalty = unbalanced_change - sigma_change
-        gap_penalty = gap_change - unbalanced_change
+        sigma_change = sigma_rating_change_by_pid[pid]
+        sigma_penalty = sigma_rating_diff_by_pid[pid]
+        unbalanced_change = ub_rating_change_by_pid[pid]
+        unbalanced_penalty = ub_rating_diff_by_pid[pid]
+        gap_change = gap_rating_change_by_pid[pid]
+        gap_penalty = gap_rating_diff_by_pid[pid]
+        final_change = final_rating_change_by_pid[pid]
 
         rows_combo.append(
             [
@@ -936,6 +935,7 @@ for place, team in placing_with_team:
                 f"{unbalanced_change:+.2f}",
                 f"{gap_penalty:+.2f}",
                 f"{gap_change:+.2f}",
+                f"{final_change:+.2f}",
             ]
         )
 
@@ -948,16 +948,16 @@ if _USE_RICH:
     _console.print(combo_table)
 else:
     print("\nSTACKED-PENALTY summary table (ordered by placing)")
-    print("=" * 180)
+    print("=" * 220)
     print(
         "placing | player | rating_change_base | sigma_cap_effect | rating_change_after_sigma | "
-        "unbalanced_grace_effect | rating_change_after_unbalanced | team_gap_effect | final_rating_change"
+        "unbalanced_grace_effect | rating_change_after_unbalanced | team_gap_effect | rating_change_after_gap | final_rating_change"
     )
-    print("-" * 180)
+    print("-" * 220)
     for r in rows_combo:
         print(
             f"{r[0]:7} | {r[1]:42} | {r[2]:>18} | {r[3]:>16} | {r[4]:>25} | "
-            f"{r[5]:>23} | {r[6]:>29} | {r[7]:>16} | {r[8]:>19}"
+            f"{r[5]:>23} | {r[6]:>29} | {r[7]:>16} | {r[8]:>23} | {r[9]:>19}"
         )
 
 # ----------------------------------------------------------------------
