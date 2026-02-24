@@ -27,7 +27,7 @@ This repository's purpose is to bring these principles to life, being the real l
 ArenaSweats uses **OpenSkill TM**, an industry-leading, battle-tested Bayesian ranking system. Unlike simple win/loss systems, OpenSkill TM is smart about understanding your true skill level.
 
 **Parameters**: Based on player feedback, we use the following parameters:
-`return ThurstoneMostellerFull(beta=(25/6) * 4 , tau=(25/300))`
+`return ThurstoneMostellerFull(sigma=(25/6), beta=(25/6) * 2.5, tau=(25/300) * 3)`
 
 ### 📈 Your Skill Profile: Two Numbers That Matter
 

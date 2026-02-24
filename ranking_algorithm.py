@@ -22,10 +22,13 @@ GAP_SATURATION = 0.55
 # median team mu (any positive gap). The check is only performed for teams
 # where both players are GM+. For such teams we temporarily reduce their mu by
 # UNBALANCED_TEAM_MU_REDUCTION times the fractional gap before calling model.rate.
+# The fractional gap is additionally scaled by (mu_low / mu_high) ** UNBALANCED_PAIR_RATIO_ALPHA
+# so larger teammate gaps receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
-UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 31.25% of the gap as a temporary mu reduction
+UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 22% of the effective gap as a temporary mu reduction
+UNBALANCED_PAIR_RATIO_ALPHA = 0.0
 
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
@@ -299,6 +302,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         lobby_median_team_mu = sorted_mu_sums[mid]
 
     unbalanced_mask = [False] * num_teams
+    effective_gap_by_team = [0.0] * num_teams
     any_unbalanced = False
 
     if lobby_median_team_mu > 0.0:
@@ -307,16 +311,20 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
             if gm_team_both_mask is not None and not gm_team_both_mask[idx]:
                 continue
 
-            diff_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
-            if diff_pct > 0.0:
-                unbalanced_mask[idx] = True
-                any_unbalanced = True
-                if logger is not None:
-                    logger.debug(
-                        "Unbalanced lobby detected for team index %d: "
-                        "mu_sum=%.3f lobby_median=%.3f diff_pct=%.3f",
-                        idx, mu_sum, lobby_median_team_mu, diff_pct
-                    )
+            base_gap_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
+            if base_gap_pct > 0.0:
+                pair_scale = _unbalanced_pair_ratio_scale(teams[idx])
+                diff_pct = base_gap_pct * pair_scale
+                if diff_pct > 0.0:
+                    effective_gap_by_team[idx] = diff_pct
+                    unbalanced_mask[idx] = True
+                    any_unbalanced = True
+                    if logger is not None:
+                        logger.debug(
+                            "Unbalanced lobby detected for team index %d: "
+                            "mu_sum=%.3f lobby_median=%.3f base_gap_pct=%.3f pair_scale=%.3f effective_gap_pct=%.3f",
+                            idx, mu_sum, lobby_median_team_mu, base_gap_pct, pair_scale, diff_pct
+                        )
     else:
         # Log when median is invalid, especially if GM+ teams are present
         if logger is not None and gm_team_both_mask is not None and any(gm_team_both_mask):
@@ -336,10 +344,8 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         if unbalanced_mask[idx]:
             adjusted_team = []
             for r in team_ratings:
-                # Reduction is 31.25% of the gap percentage
-                mu_sum = team_mu_sums[idx]
-                gap_pct = max(0.0, (mu_sum - lobby_median_team_mu) / lobby_median_team_mu)
-                reduction_pct = gap_pct * UNBALANCED_TEAM_MU_REDUCTION
+                # Reduction is scaled by team-vs-lobby gap and teammate pair-ratio.
+                reduction_pct = effective_gap_by_team[idx] * UNBALANCED_TEAM_MU_REDUCTION
                 reductions[idx] = reduction_pct
                 adjusted_mu = r.mu * (1.0 - reduction_pct)
                 adjusted_team.append(model.rating(mu=adjusted_mu, sigma=r.sigma))
@@ -351,6 +357,25 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
             ])
 
     return teams_for_rate, reductions
+
+def _unbalanced_pair_ratio_scale(team_ratings, alpha=None):
+    """Scale unbalanced-lobby grace down for lopsided teams using mu_low/mu_high."""
+    current_alpha = UNBALANCED_PAIR_RATIO_ALPHA if alpha is None else alpha
+    if current_alpha <= 0.0:
+        return 1.0
+
+    r0, r1 = team_ratings
+    mu_hi = r0.mu if r0.mu >= r1.mu else r1.mu
+    mu_lo = r1.mu if r0.mu >= r1.mu else r0.mu
+    if mu_hi <= 0.0 or mu_lo < 0.0:
+        raise ValueError(
+            f"Invalid mu values for unbalanced pair-ratio scaling: mu_hi={mu_hi}, mu_lo={mu_lo}"
+        )
+    if mu_lo == 0.0:
+        return 0.0
+
+    pair_ratio = mu_lo / mu_hi
+    return pair_ratio ** current_alpha
 
 # ----------------------------------------------------------------------
 # Main game-processing function
@@ -470,7 +495,7 @@ def process_game_ratings(
         days_since_split_start = (game_date - SPLIT_START_DATE).days
         gap_pct_by_pid = {}
         gap_scale_by_pid = {}
-        if days_since_split_start >= 5:
+        if days_since_split_start >= 1:
             apply_teammate_gap_penalty(
                 model,
                 teams,
