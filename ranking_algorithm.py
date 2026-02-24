@@ -1,11 +1,5 @@
-import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
-from datetime import datetime, timezone
-
-# Constants
-RANK_SPLIT = "2026 Preseason"
-SPLIT_START_DATE = datetime(2026, 1, 8, tzinfo=timezone.utc)
 
 # Global configuration for teammate gap penalty.
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
@@ -206,68 +200,6 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
             new_teams[i] = [lo_final, hi_final]
 
 # ----------------------------------------------------------------------
-# SIGMA CAP helper
-# ----------------------------------------------------------------------
-
-def apply_sigma_cap(model, teams, gm_team_any, team_player_ids, logger):
-    """
-    Apply the sigma cap to GM+ teams and build the list passed to model.rate.
-
-    Args:
-        model: OpenSkill model instance.
-        teams: List of teams (lists of Rating objects) in placing order.
-        gm_team_any: List[bool] indicating whether each team has at least one GM.
-        team_player_ids: List of [pid0, pid1] matching the order of teams.
-        logger: Logger or None for warnings.
-
-    Returns:
-        tuple: (rate_input, sigma_cap_scale_by_pid)
-    """
-    rate_input = []
-    sigma_cap_scale_by_pid = {}
-
-    for idx, team_ratings in enumerate(teams):
-        t_pids = team_player_ids[idx] if team_player_ids else [None, None]
-        has_gm = gm_team_any[idx] if gm_team_any else False
-
-        if has_gm:
-            r0, r1 = team_ratings
-            if r0.mu >= r1.mu:
-                s_high = r0.sigma
-                s_low = r1.sigma
-            else:
-                s_high = r1.sigma
-                s_low = r0.sigma
-            if s_low <= s_high:
-                k = 1.0
-            else:
-                current_team_sigma = math.hypot(r0.sigma, r1.sigma)
-                target_team_sigma = math.hypot(s_high, s_high)
-                if current_team_sigma > 0:
-                    k = target_team_sigma / current_team_sigma
-                else:
-                    k = 1.0
-                    if logger is not None:
-                        logger.warning(
-                            f"Sigma cap skipped for team index {idx}: "
-                            f"current_team_sigma is 0 (r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
-                        )
-            sigma_cap_scale_by_pid[t_pids[0]] = k
-            sigma_cap_scale_by_pid[t_pids[1]] = k
-            rate_input.append([
-                model.rating(mu=r0.mu, sigma=r0.sigma * k),
-                model.rating(mu=r1.mu, sigma=r1.sigma * k),
-            ])
-        else:
-            sigma_cap_scale_by_pid[t_pids[0]] = 1.0
-            sigma_cap_scale_by_pid[t_pids[1]] = 1.0
-            rate_input.append([
-                model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
-            ])
-
-    return rate_input, sigma_cap_scale_by_pid
-
-# ----------------------------------------------------------------------
 # UNBALANCED LOBBY helpers
 # ----------------------------------------------------------------------
 
@@ -395,7 +327,6 @@ def process_game_ratings(
     game_id,
     player_ratings,
     logger,
-    game_date,
     gm_set,
 ):
     """
@@ -408,7 +339,6 @@ def process_game_ratings(
         game_id: Game identifier for logging
         player_ratings: Dictionary of player_id -> Rating
         logger: Logger instance
-        game_date: datetime object representing when the game was played
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
@@ -416,8 +346,6 @@ def process_game_ratings(
         Modifiers dictionary contains per-player tracking values:
         - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a penalized team, 0.0 otherwise.
         - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no penalty.
-        - sigma_cap_scale: Multiplier applied to sigma for GM+ teams (typically 0.0-1.0).
-          Note: This is tracked for all players; value is always 1.0 for non-GM teams.
         - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
     """
     
@@ -462,13 +390,11 @@ def process_game_ratings(
     ranks = list(range(len(teams)))
 
     try:
-        rate_input, sigma_cap_scale_by_pid = apply_sigma_cap(
-            model,
-            teams,
-            gm_team_any,
-            team_player_ids,
-            logger,
-        )
+        rate_input = []
+        for team_ratings in teams:
+            rate_input.append([
+                model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
+            ])
 
         adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_both_mask=gm_team_both)
         if adjusted_teams is None:
@@ -500,25 +426,23 @@ def process_game_ratings(
 
             new_teams.append(final_team)
 
-        days_since_split_start = (game_date - SPLIT_START_DATE).days
         gap_pct_by_pid = {}
         gap_scale_by_pid = {}
-        if days_since_split_start >= 1:
-            apply_teammate_gap_penalty(
-                model,
-                teams,
-                new_teams,
-                logger,
-                gm_team_any=gm_team_any,
-                team_player_ids=team_player_ids,
-                gap_pct_by_pid=gap_pct_by_pid,
-                gap_scale_by_pid=gap_scale_by_pid,
-            )
+        apply_teammate_gap_penalty(
+            model,
+            teams,
+            new_teams,
+            logger,
+            gm_team_any=gm_team_any,
+            team_player_ids=team_player_ids,
+            gap_pct_by_pid=gap_pct_by_pid,
+            gap_scale_by_pid=gap_scale_by_pid,
+        )
 
         sorted_placings = sorted(teams_by_placing.keys())
         modifiers = {}
-        # Note: Index i in the loop below corresponds to team position in teams/new_teams/unbalanced_reductions
-        # because all three were built by iterating sorted(teams_by_placing.keys()) at line 364
+        # Index i corresponds to team position in teams/new_teams/unbalanced_reductions
+        # because all three were built by iterating sorted(teams_by_placing.keys()).
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
             new_team = new_teams[i]
@@ -528,8 +452,7 @@ def process_game_ratings(
                 modifiers[pid] = {
                     "gap_pct": gap_pct_by_pid.get(pid, 0.0),
                     "gap_scale": gap_scale_by_pid.get(pid, 1.0),
-                    "sigma_cap_scale": sigma_cap_scale_by_pid.get(pid, 1.0),
-                    "unbalanced_reduction_pct": unbalanced_reductions[i]  # Always a list at this point (set at line 427)
+                    "unbalanced_reduction_pct": unbalanced_reductions[i]
                 }
 
         return True, player_ratings, modifiers

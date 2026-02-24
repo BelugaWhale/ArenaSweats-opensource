@@ -15,7 +15,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 # Make repository root importable when running this file directly
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir))
+_REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir, os.pardir))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
@@ -184,7 +184,7 @@ if args.game_id or args.region:
         private_ch_loader = importlib.import_module("openskill_sim_ch_private")
     except Exception as e:
         raise RuntimeError(
-            "ClickHouse mode requires local private module validations/openskill_sim_ch_private.py. "
+            "ClickHouse mode requires local private module validations/openskill_sim/openskill_sim_ch_private.py. "
             "That module must expose load_sim_input_from_clickhouse(game_id, region, ch_prefix). "
             f"Import error: {e}"
         ) from e
@@ -210,7 +210,7 @@ if args.game_id or args.region:
 
     print(f"Using game_id={game_id} region={region} from ClickHouse\n")
 else:
-    input_path = input_arg or os.path.join(_SCRIPT_DIR, "sim_inputs", "sim_inputs_28.json")
+    input_path = input_arg or os.path.join(_SCRIPT_DIR, os.pardir, "sim_inputs", "sim_inputs_28.json")
     if not os.path.exists(input_path):
         raise FileNotFoundError(
             f"Sim input not found: {input_path}. "

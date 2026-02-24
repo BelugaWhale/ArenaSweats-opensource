@@ -15,17 +15,17 @@ from tkinter import ttk
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
-_REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir))
+_REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir, os.pardir))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from ranking_algorithm import instantiate_rating_model, calculate_rating
-from experiment_team_gap_population import install_tab as install_team_gap_population_tab
-from experiment_team_gap_percentiles import install_tab as install_team_gap_percentiles_tab
-from experiment_team_gap_curve_compare import install_tab as install_team_gap_curve_compare_tab
-from experiment_unbalanced_lobby_grace import install_tab as install_unbalanced_lobby_grace_tab
-from experiment_unbalanced_pair_alpha_compare import install_tab as install_unbalanced_pair_alpha_compare_tab
-from experiment_afk_damage_histogram import install_tab as install_afk_damage_histogram_tab
+from experiments.experiment_team_gap_population import install_tab as install_team_gap_population_tab
+from experiments.experiment_team_gap_percentiles import install_tab as install_team_gap_percentiles_tab
+from experiments.experiment_team_gap_curve_compare import install_tab as install_team_gap_curve_compare_tab
+from experiments.experiment_unbalanced_lobby_grace import install_tab as install_unbalanced_lobby_grace_tab
+from experiments.experiment_unbalanced_pair_alpha_compare import install_tab as install_unbalanced_pair_alpha_compare_tab
+from experiments.experiment_afk_damage_histogram import install_tab as install_afk_damage_histogram_tab
 
 REGION_TO_CH_PREFIX = {
     "euw": "DBCH",
