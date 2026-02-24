@@ -1,0 +1,569 @@
+{
+  "meta": {
+    "note": "Teams formed by grouping two players sharing the same placing. Placings 1..8 map directly.",
+    "rating_pref": "Used pre_mu/pre_sigma from euw_player_matchhistory; targets derived from next-game pre-ratings."
+  },
+  "source_game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+  "players": [
+    {
+      "id": "p1",
+      "name": "Brr brr patapim#Brrrb",
+      "mu": 53.76672927137606,
+      "sigma": 2.190060930085361,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p2",
+      "name": "Fullmetal Golem#EUW",
+      "mu": 52.962077731615544,
+      "sigma": 1.7677242011285126,
+      "pre_source": "mh",
+      "team_placing": 1
+    },
+    {
+      "id": "p3",
+      "name": "MadMango89#ZaZa",
+      "mu": 76.27318232978891,
+      "sigma": 2.981434344897289,
+      "pre_source": "mh",
+      "team_placing": 2
+    },
+    {
+      "id": "p4",
+      "name": "Nidalee#white",
+      "mu": 76.27318232978891,
+      "sigma": 2.981434344897289,
+      "pre_source": "mh",
+      "team_placing": 2
+    },
+    {
+      "id": "p5",
+      "name": "Stu Beggs#EUW",
+      "mu": 51.331130460272696,
+      "sigma": 1.6724634483482308,
+      "pre_source": "mh",
+      "team_placing": 3
+    },
+    {
+      "id": "p6",
+      "name": "KNOBGOBBLER9000#6969",
+      "mu": 72.51876202029179,
+      "sigma": 2.293212960049808,
+      "pre_source": "mh",
+      "team_placing": 3
+    },
+    {
+      "id": "p7",
+      "name": "MOTHER CURBST0MP#RAAAH",
+      "mu": 54.41074024135226,
+      "sigma": 1.7935670226960738,
+      "pre_source": "mh",
+      "team_placing": 4
+    },
+    {
+      "id": "p8",
+      "name": "Aldadanhon#EUW",
+      "mu": 47.738013008798866,
+      "sigma": 1.8605648210742878,
+      "pre_source": "mh",
+      "team_placing": 4
+    },
+    {
+      "id": "p9",
+      "name": "LBGTQPLAYER#men",
+      "mu": 54.17453172625547,
+      "sigma": 3.5588307639204313,
+      "pre_source": "mh",
+      "team_placing": 5
+    },
+    {
+      "id": "p10",
+      "name": "BlackDog#80085",
+      "mu": 53.34881173949553,
+      "sigma": 1.6210371977172287,
+      "pre_source": "mh",
+      "team_placing": 5
+    },
+    {
+      "id": "p11",
+      "name": "Barcode ad#EUW",
+      "mu": 51.06221652060696,
+      "sigma": 2.5295039557485106,
+      "pre_source": "mh",
+      "team_placing": 6
+    },
+    {
+      "id": "p12",
+      "name": "INTelligent feed#EUW",
+      "mu": 61.26963168000182,
+      "sigma": 2.859689970481892,
+      "pre_source": "mh",
+      "team_placing": 6
+    },
+    {
+      "id": "p13",
+      "name": "BABTOOO1#EUW",
+      "mu": 55.18837729199048,
+      "sigma": 1.7541853311390163,
+      "pre_source": "mh",
+      "team_placing": 7
+    },
+    {
+      "id": "p14",
+      "name": "Daza#ADC",
+      "mu": 50.50456941208678,
+      "sigma": 1.9003149285070629,
+      "pre_source": "mh",
+      "team_placing": 7
+    },
+    {
+      "id": "p15",
+      "name": "pierrelefris\u00e9#EUW",
+      "mu": 53.668310376806055,
+      "sigma": 1.703729310859681,
+      "pre_source": "mh",
+      "team_placing": 8
+    },
+    {
+      "id": "p16",
+      "name": "Ale\u017c Wieje#EUW",
+      "mu": 53.693129825975674,
+      "sigma": 1.701571941868241,
+      "pre_source": "mh",
+      "team_placing": 8
+    }
+  ],
+  "teams": [
+    [
+      "p1",
+      "p2"
+    ],
+    [
+      "p3",
+      "p4"
+    ],
+    [
+      "p5",
+      "p6"
+    ],
+    [
+      "p7",
+      "p8"
+    ],
+    [
+      "p9",
+      "p10"
+    ],
+    [
+      "p11",
+      "p12"
+    ],
+    [
+      "p13",
+      "p14"
+    ],
+    [
+      "p15",
+      "p16"
+    ]
+  ],
+  "placings": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "targets": {
+    "p1": {
+      "mu": 55.157081750753434,
+      "sigma": 2.1865035726940736
+    },
+    "p2": {
+      "mu": 53.868597480542306,
+      "sigma": 1.7669811908881146
+    },
+    "p3": {
+      "mu": 0.0,
+      "sigma": 0.0
+    },
+    "p4": {
+      "mu": 0.0,
+      "sigma": 0.0
+    },
+    "p5": {
+      "mu": 51.35268871674621,
+      "sigma": 1.6727907591882627
+    },
+    "p6": {
+      "mu": 72.54076930228459,
+      "sigma": 2.291590041146267
+    },
+    "p7": {
+      "mu": 54.77031247424256,
+      "sigma": 1.79329327495861
+    },
+    "p8": {
+      "mu": 48.12489130850183,
+      "sigma": 1.8599650503838858
+    },
+    "p9": {
+      "mu": 54.17819303768992,
+      "sigma": 3.5338695147708856
+    },
+    "p10": {
+      "mu": 0.0,
+      "sigma": 0.0
+    },
+    "p11": {
+      "mu": 50.386493321917634,
+      "sigma": 2.5215669145880453
+    },
+    "p12": {
+      "mu": 60.40618893890625,
+      "sigma": 2.84745027191915
+    },
+    "p13": {
+      "mu": 54.822264003163305,
+      "sigma": 1.7541554101613066
+    },
+    "p14": {
+      "mu": 0.0,
+      "sigma": 0.0
+    },
+    "p15": {
+      "mu": 53.08799921709779,
+      "sigma": 1.7040049453411907
+    },
+    "p16": {
+      "mu": 0.0,
+      "sigma": 0.0
+    }
+  },
+  "target_games": [
+    {
+      "player_id": "p1",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 1,
+      "rating_change": 105,
+      "avg_worse_opp_rating": 3834,
+      "avg_better_opp_rating": 0,
+      "pregame_mu": 53.76672927137606,
+      "pregame_sigma": 2.190060930085361,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 55.157081750753434,
+      "postgame_sigma": 2.1865035726940736,
+      "next_pregame_mu": 55.157081750753434,
+      "next_pregame_sigma": 2.1865035726940736,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p2",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 1,
+      "rating_change": 69,
+      "avg_worse_opp_rating": 3834,
+      "avg_better_opp_rating": 0,
+      "pregame_mu": 52.962077731615544,
+      "pregame_sigma": 1.7677242011285126,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 53.868597480542306,
+      "postgame_sigma": 1.7669811908881146,
+      "next_pregame_mu": 53.868597480542306,
+      "next_pregame_sigma": 1.7669811908881146,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p3",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 2,
+      "rating_change": 12,
+      "avg_worse_opp_rating": 3629,
+      "avg_better_opp_rating": 3644,
+      "pregame_mu": 76.27318232978891,
+      "pregame_sigma": 2.981434344897289,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.13118650019168854,
+      "postgame_mu": 0.0,
+      "postgame_sigma": 0.0,
+      "next_pregame_mu": 0.0,
+      "next_pregame_sigma": 0.0,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p4",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 2,
+      "rating_change": 12,
+      "avg_worse_opp_rating": 3629,
+      "avg_better_opp_rating": 3644,
+      "pregame_mu": 76.27318232978891,
+      "pregame_sigma": 2.981434344897289,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.13118650019168854,
+      "postgame_mu": 0.0,
+      "postgame_sigma": 0.0,
+      "next_pregame_mu": 0.0,
+      "next_pregame_sigma": 0.0,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p5",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 3,
+      "rating_change": 1,
+      "avg_worse_opp_rating": 3515,
+      "avg_better_opp_rating": 4353,
+      "pregame_mu": 51.331130460272696,
+      "pregame_sigma": 1.6724634483482308,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 51.35268871674621,
+      "postgame_sigma": 1.6727907591882627,
+      "next_pregame_mu": 51.35268871674621,
+      "next_pregame_sigma": 1.6727907591882627,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p6",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 3,
+      "rating_change": 2,
+      "avg_worse_opp_rating": 3515,
+      "avg_better_opp_rating": 4353,
+      "pregame_mu": 72.51876202029179,
+      "pregame_sigma": 2.293212960049808,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.2921675741672516,
+      "team_gap_scale": 0.5436019897460938,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 72.54076930228459,
+      "postgame_sigma": 2.291590041146267,
+      "next_pregame_mu": 72.54076930228459,
+      "next_pregame_sigma": 2.291590041146267,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p7",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 4,
+      "rating_change": 27,
+      "avg_worse_opp_rating": 3531,
+      "avg_better_opp_rating": 4302,
+      "pregame_mu": 54.41074024135226,
+      "pregame_sigma": 1.7935670226960738,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 54.77031247424256,
+      "postgame_sigma": 1.79329327495861,
+      "next_pregame_mu": 54.77031247424256,
+      "next_pregame_sigma": 1.79329327495861,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p8",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 4,
+      "rating_change": 29,
+      "avg_worse_opp_rating": 3531,
+      "avg_better_opp_rating": 4302,
+      "pregame_mu": 47.738013008798866,
+      "pregame_sigma": 1.8605648210742878,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 48.12489130850183,
+      "postgame_sigma": 1.8599650503838858,
+      "next_pregame_mu": 48.12489130850183,
+      "next_pregame_sigma": 1.8599650503838858,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p9",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 5,
+      "rating_change": 6,
+      "avg_worse_opp_rating": 3558,
+      "avg_better_opp_rating": 4088,
+      "pregame_mu": 54.17453172625547,
+      "pregame_sigma": 3.5588307639204313,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 54.17819303768992,
+      "postgame_sigma": 3.5338695147708856,
+      "next_pregame_mu": 54.17819303768992,
+      "next_pregame_sigma": 3.5338695147708856,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p10",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 5,
+      "rating_change": 1,
+      "avg_worse_opp_rating": 3558,
+      "avg_better_opp_rating": 4088,
+      "pregame_mu": 53.34881173949553,
+      "pregame_sigma": 1.6210371977172287,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 0.0,
+      "postgame_sigma": 0.0,
+      "next_pregame_mu": 0.0,
+      "next_pregame_sigma": 0.0,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p11",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 6,
+      "rating_change": -49,
+      "avg_worse_opp_rating": 3561,
+      "avg_better_opp_rating": 3961,
+      "pregame_mu": 51.06221652060696,
+      "pregame_sigma": 2.5295039557485106,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 50.386493321917634,
+      "postgame_sigma": 2.5215669145880453,
+      "next_pregame_mu": 50.386493321917634,
+      "next_pregame_sigma": 2.5215669145880453,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p12",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 6,
+      "rating_change": -62,
+      "avg_worse_opp_rating": 3561,
+      "avg_better_opp_rating": 3961,
+      "pregame_mu": 61.26963168000182,
+      "pregame_sigma": 2.859689970481892,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 60.40618893890625,
+      "postgame_sigma": 2.84745027191915,
+      "next_pregame_mu": 60.40618893890625,
+      "next_pregame_sigma": 2.84745027191915,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p13",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 7,
+      "rating_change": -27,
+      "avg_worse_opp_rating": 3599,
+      "avg_better_opp_rating": 3893,
+      "pregame_mu": 55.18837729199048,
+      "pregame_sigma": 1.7541853311390163,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 54.822264003163305,
+      "postgame_sigma": 1.7541554101613066,
+      "next_pregame_mu": 54.822264003163305,
+      "next_pregame_sigma": 1.7541554101613066,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p14",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 7,
+      "rating_change": -32,
+      "avg_worse_opp_rating": 3599,
+      "avg_better_opp_rating": 3893,
+      "pregame_mu": 50.50456941208678,
+      "pregame_sigma": 1.9003149285070629,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 0.0,
+      "postgame_sigma": 0.0,
+      "next_pregame_mu": 0.0,
+      "next_pregame_sigma": 0.0,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p15",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 8,
+      "rating_change": -44,
+      "avg_worse_opp_rating": 0,
+      "avg_better_opp_rating": 3840,
+      "pregame_mu": 53.668310376806055,
+      "pregame_sigma": 1.703729310859681,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 53.08799921709779,
+      "postgame_sigma": 1.7040049453411907,
+      "next_pregame_mu": 53.08799921709779,
+      "next_pregame_sigma": 1.7040049453411907,
+      "post_source": "next_game_pregame"
+    },
+    {
+      "player_id": "p16",
+      "game_id": "WfYe8TQY7YQIS808-K6YORdvyAeZJF9k9LZW3Q0dTwM=",
+      "game_ts": "2025-11-29T18:46:52",
+      "placing": 8,
+      "rating_change": -43,
+      "avg_worse_opp_rating": 0,
+      "avg_better_opp_rating": 3840,
+      "pregame_mu": 53.693129825975674,
+      "pregame_sigma": 1.701571941868241,
+      "sigma_cap_scale": 1.0,
+      "team_gap_pct": 0.0,
+      "team_gap_scale": 1.0,
+      "unbalanced_reduction_pct": 0.0,
+      "postgame_mu": 0.0,
+      "postgame_sigma": 0.0,
+      "next_pregame_mu": 0.0,
+      "next_pregame_sigma": 0.0,
+      "post_source": "next_game_pregame"
+    }
+  ]
+}

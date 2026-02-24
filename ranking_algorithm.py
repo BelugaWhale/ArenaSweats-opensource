@@ -10,12 +10,13 @@ SPLIT_START_DATE = datetime(2026, 1, 8, tzinfo=timezone.utc)
 # Global configuration for teammate gap penalty.
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
 #                         higher player's mu/sigma delta once fully penalised.
-# GAP_TRIGGER: relative mu gap (0-1) at which the penalty starts to apply.
-# GAP_SATURATION: relative mu gap (0-1) at which we are fully at
-#                 PENALTY_MIN_MULTIPLIER and remain flat afterwards.
+# GAP_TRIGGER_LOW_MU_RATIO: no teammate penalty while mu_low is at least this
+#                           fraction of mu_high (e.g. 0.90 means "within 10%").
+# GAP_SATURATION_LOW_MU: teammate mu value at which the penalty is fully
+#                        saturated at PENALTY_MIN_MULTIPLIER.
 PENALTY_MIN_MULTIPLIER = 0.05
-GAP_TRIGGER = 0.10
-GAP_SATURATION = 0.55
+GAP_TRIGGER_LOW_MU_RATIO = 0.90
+GAP_SATURATION_LOW_MU = 20.0
 
 # Unbalanced lobby configuration.
 # A team is considered "unbalanced" if its mu sum is above the lobby's
@@ -28,7 +29,7 @@ GAP_SATURATION = 0.55
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 22% of the effective gap as a temporary mu reduction
-UNBALANCED_PAIR_RATIO_ALPHA = 0.0
+UNBALANCED_PAIR_RATIO_ALPHA = 3.0
 
 '''
 The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
@@ -115,21 +116,27 @@ def instantiate_rating_model():
 
     return model
 
-def _teammate_penalty_scale(gap_pct: float) -> float:
+def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
     """
     Compute the multiplier for the high-mu player's mu/sigma delta,
-    based on the relative mu gap in [0, 1].
+    based on mu_low relative to mu_high, with linear falloff to saturation.
     """
-    # Below the trigger we do nothing.
-    if gap_pct <= GAP_TRIGGER:
+    trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
+
+    # Within the trigger zone we do nothing.
+    if mu_lo >= trigger_low_mu:
         return 1.0
 
-    # At or above saturation, use the minimum multiplier (flat line).
-    if gap_pct >= GAP_SATURATION:
+    # At or below saturation we apply full teammate penalty.
+    if mu_lo <= GAP_SATURATION_LOW_MU:
+        return PENALTY_MIN_MULTIPLIER
+
+    # Degenerate range: trigger and saturation overlap; treat as step.
+    if trigger_low_mu <= GAP_SATURATION_LOW_MU:
         return PENALTY_MIN_MULTIPLIER
 
     # Linear drop between trigger and saturation.
-    progress = (gap_pct - GAP_TRIGGER) / (GAP_SATURATION - GAP_TRIGGER)
+    progress = (trigger_low_mu - mu_lo) / (trigger_low_mu - GAP_SATURATION_LOW_MU)
     scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * progress
 
     # Clamp to safety range
@@ -162,16 +169,17 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
         if mu_hi <= 0.0:
             continue
 
-        # Relative mu gap (scale-free)
+        trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
+        if mu_lo >= trigger_low_mu:
+            continue
+
+        # Relative mu gap (scale-free), tracked for modifiers output.
         gap_pct = 1.0 - (mu_lo / mu_hi)
         if gap_pct <= 0.0:
             continue
 
-        if gap_pct < GAP_TRIGGER:
-            continue
-
         gap_pct = min(gap_pct, 1.0)
-        scale = _teammate_penalty_scale(gap_pct)
+        scale = _teammate_penalty_scale(mu_hi, mu_lo)
         hi_pid = None
         if team_player_ids is not None:
             ids = team_player_ids[i]

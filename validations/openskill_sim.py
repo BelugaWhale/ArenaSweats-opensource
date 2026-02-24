@@ -6,7 +6,6 @@ import math
 import sys
 import os
 import logging
-from datetime import datetime, timezone
 
 # Ensure Unicode table labels print reliably on Windows/non-UTF8 default consoles.
 if hasattr(sys.stdout, "reconfigure"):
@@ -31,7 +30,6 @@ from ranking_algorithm import (
     UNBALANCED_PAIR_RATIO_ALPHA,
     check_for_unbalanced_lobby,
     process_game_ratings,
-    apply_sigma_cap as apply_sigma_cap_algo,
     instantiate_rating_model,
     calculate_rating,
 )
@@ -70,6 +68,56 @@ def _clone_rating(model, rating_obj):
 
 def _live_rating_delta(before_rating, after_rating) -> int:
     return int(calculate_rating(after_rating) - calculate_rating(before_rating))
+
+
+def apply_sigma_cap_algo(model, teams, gm_team_any, team_player_ids, logger):
+    rate_input = []
+    sigma_cap_scale_by_pid = {}
+
+    for idx, team_ratings in enumerate(teams):
+        t_pids = team_player_ids[idx] if team_player_ids else [None, None]
+        has_gm = gm_team_any[idx] if gm_team_any else False
+
+        if has_gm:
+            r0, r1 = team_ratings
+            if r0.mu >= r1.mu:
+                s_high = r0.sigma
+                s_low = r1.sigma
+            else:
+                s_high = r1.sigma
+                s_low = r0.sigma
+            if s_low <= s_high:
+                k = 1.0
+            else:
+                current_team_sigma = math.hypot(r0.sigma, r1.sigma)
+                target_team_sigma = math.hypot(s_high, s_high)
+                if current_team_sigma > 0:
+                    k = target_team_sigma / current_team_sigma
+                else:
+                    k = 1.0
+                    if logger is not None:
+                        logger.warning(
+                            f"Sigma cap skipped for team index {idx}: "
+                            f"current_team_sigma is 0 (r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
+                        )
+            sigma_cap_scale_by_pid[t_pids[0]] = k
+            sigma_cap_scale_by_pid[t_pids[1]] = k
+            rate_input.append(
+                [
+                    model.rating(mu=r0.mu, sigma=r0.sigma * k),
+                    model.rating(mu=r1.mu, sigma=r1.sigma * k),
+                ]
+            )
+        else:
+            sigma_cap_scale_by_pid[t_pids[0]] = 1.0
+            sigma_cap_scale_by_pid[t_pids[1]] = 1.0
+            rate_input.append(
+                [
+                    model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
+                ]
+            )
+
+    return rate_input, sigma_cap_scale_by_pid
 
 
 # ----------------------------------------------------------------------
@@ -292,19 +340,6 @@ for pid, rating in before_ratings.items():
 
 gm_for_process = gm_set if gm_set else set()
 game_id = data.get("source_game_id", "simulation_game")
-game_ts_raw = data.get("game_ts")
-if not game_ts_raw and target_games:
-    game_ts_raw = target_games[0].get("game_ts")
-if game_ts_raw:
-    try:
-        game_date = datetime.fromisoformat(game_ts_raw)
-    except Exception:
-        game_date = datetime.now(timezone.utc)
-    else:
-        if game_date.tzinfo is None:
-            game_date = game_date.replace(tzinfo=timezone.utc)
-else:
-    game_date = datetime.now(timezone.utc)
 
 success, production_map, _ = process_game_ratings(
     model,
@@ -312,7 +347,6 @@ success, production_map, _ = process_game_ratings(
     game_id,
     player_ratings_input,
     ranking_logger,
-    game_date,
     gm_for_process,
 )
 if not success:
@@ -602,14 +636,12 @@ def run_unbalanced_only(alpha_value):
 
 
 # ----------------------------------------------------------------------
-# SIGMA-CAP summary table (ratio-preserving, exact team-sigma target)
+# SIGMA-CAP summary table (aligned with stacked pipeline sigma-only stage)
 # ----------------------------------------------------------------------
-base_mu_delta_by_pid = {pid: baseline_after_ratings[pid].mu - before_ratings[pid].mu for pid in before_ratings}
-base_team_mu_delta_by_place = {place: sum(base_mu_delta_by_pid[pid] for pid in team) for place, team in placing_with_team}
+stack_after_sigma = run_pipeline(apply_sigma_cap=True, apply_unbalanced=False, apply_gap_penalty=False)
 
 scaled_input_by_pid = {}
 scaled_pre_team = {}
-
 sigma_cap_base_pairs = []
 for pid0, pid1 in team_order_ids:
     sigma_cap_base_pairs.append([_clone_rating(model, before_ratings[pid0]), _clone_rating(model, before_ratings[pid1])])
@@ -628,55 +660,19 @@ for idx, team in enumerate(team_order_ids):
     c0, c1 = scaled_pairs[idx]
     scaled_input_by_pid[p0] = c0
     scaled_input_by_pid[p1] = c1
-
     mu_sum = before_ratings[p0].mu + before_ratings[p1].mu
     sig_rms = math.hypot(c0.sigma, c1.sigma)
     team_rt = _simple_rating(mu_sum, sig_rms)
     scaled_pre_team[place] = (mu_sum, sig_rms, team_rt)
 
-scaled_pairs_for_rate = [
-    [
-        _clone_rating(model, pair[0]),
-        _clone_rating(model, pair[1]),
-    ]
-    for pair in scaled_pairs
-]
-
-scaled_new_pairs = model.rate(scaled_pairs_for_rate, ranks=ranks)
-
-scaled_after = dict(before_ratings)
-for idx, new_pair in enumerate(scaled_new_pairs):
-    pid0, pid1 = team_order_ids[idx]
-    scaled_after[pid0] = new_pair[0]
-    scaled_after[pid1] = new_pair[1]
-
-scaled_post_team = {}
+sigma_post_team = {}
 for place, team in placing_with_team:
-    a0 = scaled_after[team[0]]
-    a1 = scaled_after[team[1]]
+    a0 = stack_after_sigma[team[0]]
+    a1 = stack_after_sigma[team[1]]
     mu_sum = a0.mu + a1.mu
     sig_rms = math.hypot(a0.sigma, a1.sigma)
     team_rt = _simple_rating(mu_sum, sig_rms)
-    scaled_post_team[place] = (mu_sum, sig_rms, team_rt)
-
-team_scale = {}
-for place, team in placing_with_team:
-    base_team_dmu = base_team_mu_delta_by_place[place]
-    new_team_dmu = sum(scaled_after[pid].mu - scaled_input_by_pid[pid].mu for pid in team)
-
-    if abs(base_team_dmu) < 1e-12:
-        raise ValueError(f"Baseline team Δμ ~ 0 at placing {place}; cannot preserve split under scaling.")
-
-    team_scale[place] = new_team_dmu / base_team_dmu
-
-final_mu = {}
-final_sigma = {}
-for place, team in placing_with_team:
-    r_team = team_scale[place]
-    for pid in team:
-        final_mu[pid] = before_ratings[pid].mu + r_team * base_mu_delta_by_pid[pid]
-        final_sigma_delta = scaled_after[pid].sigma - scaled_input_by_pid[pid].sigma
-        final_sigma[pid] = before_ratings[pid].sigma + final_sigma_delta
+    sigma_post_team[place] = (mu_sum, sig_rms, team_rt)
 
 headers_sigma = [
     "placing",
@@ -698,13 +694,11 @@ for place, team in placing_with_team:
         name = names_map.get(pid) or pid
 
         b = before_ratings[pid]
+        a = stack_after_sigma[pid]
         pre_player_rating = calculate_rating(b)
         pre_player_str = f"{b.mu:.2f} {b.sigma:.2f} ({pre_player_rating})"
-
-        mu_f = final_mu[pid]
-        sg_f = final_sigma[pid]
-        post_player_rating = calculate_rating(model.rating(mu=mu_f, sigma=sg_f))
-        post_player_str = f"{mu_f:.2f} {sg_f:.2f} ({post_player_rating})"
+        post_player_rating = calculate_rating(a)
+        post_player_str = f"{a.mu:.2f} {a.sigma:.2f} ({post_player_rating})"
 
         delta_rating = post_player_rating - pre_player_rating
         delta_diff = delta_rating - baseline_rating_change[pid]
@@ -714,7 +708,7 @@ for place, team in placing_with_team:
         if idx == 0:
             mu_t, sg_t, rt_t = scaled_pre_team[place]
             pre_team_str = f"{mu_t:.2f} {sg_t:.2f} ({rt_t:.2f})"
-            mu_u, sg_u, rt_u = scaled_post_team[place]
+            mu_u, sg_u, rt_u = sigma_post_team[place]
             sigma_team_str = f"{mu_u:.2f} {sg_u:.2f} ({rt_u:.2f})"
         else:
             pre_team_str = ""
@@ -810,7 +804,7 @@ for place, team in placing_with_team:
             mu_hi, mu_lo = r1.mu, r0.mu
         if mu_hi > 0.0:
             gap_pct_val = max(0.0, min(1.0, 1.0 - (mu_lo / mu_hi)))
-            scale_val = _teammate_penalty_scale(gap_pct_val)
+            scale_val = _teammate_penalty_scale(mu_hi, mu_lo)
         else:
             gap_pct_val = 0.0
             scale_val = 1.0
@@ -1112,8 +1106,19 @@ else:
 # ----------------------------------------------------------------------
 # COMBINED STACKED-PENALTY table (sigma-cap -> unbalanced lobby -> gap penalty)
 # ----------------------------------------------------------------------
-final_rating_change_by_pid = {
-    pid: _live_rating_delta(before_ratings[pid], production_after_ratings[pid])
+stack_after_unbalanced = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=False)
+stack_after_gap = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=True)
+
+stack_sigma_change_by_pid = {
+    pid: _live_rating_delta(before_ratings[pid], stack_after_sigma[pid])
+    for pid in before_ratings
+}
+stack_unbalanced_change_by_pid = {
+    pid: _live_rating_delta(before_ratings[pid], stack_after_unbalanced[pid])
+    for pid in before_ratings
+}
+stack_gap_change_by_pid = {
+    pid: _live_rating_delta(before_ratings[pid], stack_after_gap[pid])
     for pid in before_ratings
 }
 
@@ -1136,13 +1141,19 @@ for place, team in placing_with_team:
         name = names_map.get(pid) or pid
 
         base_change = baseline_rating_change[pid]
-        sigma_change = sigma_rating_change_by_pid[pid]
-        sigma_penalty = sigma_rating_diff_by_pid[pid]
-        unbalanced_change = ub_rating_change_by_pid[pid]
-        unbalanced_penalty = ub_rating_diff_by_pid[pid]
-        gap_change = gap_rating_change_by_pid[pid]
-        gap_penalty = gap_rating_diff_by_pid[pid]
-        final_change = final_rating_change_by_pid[pid]
+        sigma_change = stack_sigma_change_by_pid[pid]
+        sigma_penalty = sigma_change - base_change
+        unbalanced_change = stack_unbalanced_change_by_pid[pid]
+        unbalanced_penalty = unbalanced_change - sigma_change
+        gap_change = stack_gap_change_by_pid[pid]
+        gap_penalty = gap_change - unbalanced_change
+        final_change = gap_change
+        recomposed_final = base_change + sigma_penalty + unbalanced_penalty + gap_penalty
+        if recomposed_final != final_change:
+            raise ValueError(
+                f"Stacked summary mismatch for {pid}: "
+                f"recomposed_final={recomposed_final}, final_change={final_change}"
+            )
 
         rows_combo.append(
             [
@@ -1201,7 +1212,11 @@ for pid in sorted(before_ratings.keys()):
     )
 
 gap_curve_xs = list(range(101))
-gap_curve_ys = [_teammate_penalty_scale(x / 100.0) * 100.0 for x in gap_curve_xs]
+gap_curve_mu_high_reference = 40.0
+gap_curve_ys = [
+    _teammate_penalty_scale(gap_curve_mu_high_reference, gap_curve_mu_high_reference * (1.0 - (x / 100.0))) * 100.0
+    for x in gap_curve_xs
+]
 
 report_payload = {
     "meta": {
@@ -1229,6 +1244,7 @@ report_payload = {
         "gap_penalty_curve": {
             "x_pct": gap_curve_xs,
             "y_multiplier_pct": gap_curve_ys,
+            "mu_high_reference": gap_curve_mu_high_reference,
         }
     },
 }
@@ -1254,7 +1270,7 @@ if not args.no_charts:
         plt.figure(figsize=(8, 4))
         plt.plot(xs, ys)
         plt.title("GAP-PENALTY Scaling Curve")
-        plt.xlabel("Relative teammate μ gap (%)")
+        plt.xlabel(f"Relative teammate μ gap (%) at μ_high={gap_curve_mu_high_reference:.1f}")
         plt.ylabel("Low-impact multiplier (%)")
         plt.xlim(0, 100)
         plt.ylim(0, 100)

@@ -1,3 +1,12 @@
 .env
 __pycache__/ranking_algorithm.cpython-310.pyc
 __pycache__/ranking_algorithm.cpython-311.pyc
+validations/__pycache__/experiment_afk_damage_histogram.cpython-311.pyc
+validations/__pycache__/experiment_team_gap_curve_compare.cpython-311.pyc
+validations/__pycache__/experiment_team_gap_percentiles.cpython-311.pyc
+validations/__pycache__/experiment_team_gap_population.cpython-311.pyc
+validations/__pycache__/experiment_unbalanced_lobby_grace.cpython-311.pyc
+validations/__pycache__/experiment_unbalanced_pair_alpha_compare.cpython-311.pyc
+validations/__pycache__/openskill_sim_ch_private.cpython-310.pyc
+validations/__pycache__/openskill_sim_ch_private.cpython-311.pyc
+validations/__pycache__/openskill_sim_charts.cpython-311.pyc
