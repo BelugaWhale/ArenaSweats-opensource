@@ -1,12 +1,12 @@
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
 
-# Global configuration for teammate gap penalty.
+# Global configuration for the team-gap modifier (historically named "penalty").
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
-#                         higher player's mu/sigma delta once fully penalised.
-# GAP_TRIGGER_LOW_MU_RATIO: no teammate penalty while mu_low is at least this
+#                         higher player's mu/sigma delta once fully reduced.
+# GAP_TRIGGER_LOW_MU_RATIO: no team-gap modifier while mu_low is at least this
 #                           fraction of mu_high (e.g. 0.90 means "within 10%").
-# GAP_SATURATION_LOW_MU: teammate mu value at which the penalty is fully
+# GAP_SATURATION_LOW_MU: teammate mu value at which the modifier is fully
 #                        saturated at PENALTY_MIN_MULTIPLIER.
 PENALTY_MIN_MULTIPLIER = 0.05
 GAP_TRIGGER_LOW_MU_RATIO = 0.90
@@ -26,13 +26,16 @@ UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 22% of the effective gap as a temp
 UNBALANCED_PAIR_RATIO_ALPHA = 3.0
 
 '''
-The OpenSkill rating system is an open-source library that provides multiplayer rating algorithms, including the Plackett-Luce model for handling ranked outcomes in multiplayer games.
-Like TrueSkill, it represents a player's skill level using a Gaussian distribution, characterized by two key parameters: mu (μ) and sigma (σ).
-Mu (μ): The Average Skill
-    Mu (μ) represents the system's current estimate of a player's average skill. Think of it as the center of a player's skill range. A higher mu value indicates a higher perceived skill level. When a player wins a game, their mu value increases, and when they lose, it decreases.
-Sigma (σ): The Uncertainty
-    Sigma (σ) represents the degree of uncertainty the system has about a player's mu value. A high sigma means the system is less confident in its assessment of the player's skill, while a low sigma indicates a higher degree of confidence.
-    How it changes: A player's sigma is highest when they are new to the system. As a player participates in more games, providing the system with more data, their sigma value decreases, signifying that the system is becoming more certain about their true skill level. Playing consistently can lead to a lower sigma, while inconsistent performances can result in a higher one.
+ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
+Each player is represented by:
+- mu (μ): current estimated skill
+- sigma (σ): uncertainty in that estimate
+
+This module applies production rating updates in three stages:
+1) Base OpenSkill rate() update on all teams.
+2) Optional unbalanced-lobby grace for teams where both players are GM+.
+3) Team-gap modifier for the higher-mu player in GM-scoped teams.
+
 REFERENCES:
 - https://openskill.me/
 - https://arxiv.org/abs/2401.05451
@@ -41,8 +44,9 @@ REFERENCES:
 '''
 
 def calculate_rating(rating):
-    """Calculate the final rating from mu and sigma"""
     """
+    Calculate displayed rating as round((mu - 3*sigma) * 75).
+
     Microsoft research recommends using mu-3*sigma as the "conservative skill estimate" for TrueSkill, and this is commonly applied in similar systems like OpenSkill.
     https://www.microsoft.com/en-us/research/project/trueskill-ranking-system/
     """
@@ -112,8 +116,13 @@ def instantiate_rating_model():
 
 def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
     """
-    Compute the multiplier for the high-mu player's mu/sigma delta,
-    based on mu_low relative to mu_high, with linear falloff to saturation.
+    Compute the team-gap modifier multiplier for the high-mu player's
+    mu/sigma delta.
+
+    Behavior:
+    - No modifier while mu_lo >= 0.90 * mu_hi.
+    - Linear reduction between the trigger and mu_lo == 20.
+    - Full reduction at/below mu_lo == 20, capped by PENALTY_MIN_MULTIPLIER.
     """
     trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
 
@@ -121,7 +130,7 @@ def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
     if mu_lo >= trigger_low_mu:
         return 1.0
 
-    # At or below saturation we apply full teammate penalty.
+    # At or below saturation we apply full reduction.
     if mu_lo <= GAP_SATURATION_LOW_MU:
         return PENALTY_MIN_MULTIPLIER
 
@@ -138,8 +147,11 @@ def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
 
 def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None):
     """
-    Post-process rating updates to dampen gains/losses for the higher-mu player
-    in teams with large mu gaps, but only when that player is "high rated".
+    Apply the team-gap modifier by scaling the higher-mu player's update in
+    teams with large teammate mu gaps.
+
+    If gm_team_any is provided, modifier is only evaluated for teams where at
+    least one teammate is GM+.
     """
     for i in range(len(teams)):
         if gm_team_any is not None and not gm_team_any[i]:
@@ -183,7 +195,9 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
         if hi_pid is not None and gap_scale_by_pid is not None:
             gap_scale_by_pid[hi_pid] = scale
 
-        # Apply to both mu and sigma deltas for the higher player
+        # Apply to both mu and sigma deltas for the higher player.
+        # Scaling sigma-delta as well means certainty is "used up" less in these
+        # low-information games, so future games can carry more learning.
         delta_mu = hi_new.mu - hi_old.mu
         delta_sigma = hi_new.sigma - hi_old.sigma
 
@@ -220,6 +234,8 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         teams_for_rate: None if no adjustments are required; otherwise a new
             list of teams whose players may have adjusted mu values for
             unbalanced teams (and copied ratings for others).
+        reductions: None if no adjustments are required; otherwise list[float]
+            aligned with teams containing per-team temporary reduction pct.
     """
     if not UNBALANCED_LOBBY_GRACE_ENABLED:
         return None, None
@@ -339,13 +355,14 @@ def process_game_ratings(
         game_id: Game identifier for logging
         player_ratings: Dictionary of player_id -> Rating
         logger: Logger instance
+        gm_set: Set of player_ids considered GM+ for this game's processing
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
 
         Modifiers dictionary contains per-player tracking values:
-        - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a penalized team, 0.0 otherwise.
-        - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no penalty.
+        - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a modified team, 0.0 otherwise.
+        - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no modifier.
         - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
     """
     

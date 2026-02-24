@@ -14,7 +14,7 @@ Through these **3 principles**, the ArenaSweats ranked algorithm will stay trust
 
 1.  **Use Industry Best System** - Currently OpenSkill TM as the foundation
 2.  **Transparent and Open Source** - Every calculation is public and verifiable
-3.  **Community-Driven Modifications** - Any and all modifications will be decided by the community over on [Discord](https://discord.gg/BvGFJ4WEWg)
+3.  **Community-Driven Adjustments** - Any and all adjustments will be decided by the community over on [Discord](https://discord.gg/BvGFJ4WEWg)
 
 This repository's purpose is to bring these principles to life, being the real location where the source code of the LIVE leaderboard ranked algorithm lives.
 
@@ -26,8 +26,8 @@ This repository's purpose is to bring these principles to life, being the real l
 
 ArenaSweats uses **OpenSkill TM**, an industry-leading, battle-tested Bayesian ranking system. Unlike simple win/loss systems, OpenSkill TM is smart about understanding your true skill level.
 
-**Parameters**: Based on player feedback, we use the following parameters:
-`return ThurstoneMostellerFull(sigma=(25/6), beta=(25/6) * 2.5, tau=(25/300) * 3)`
+**Parameters**: Based on player feedback and simulation validation, we currently use:
+`return ThurstoneMostellerFull(sigma=(25/5.75), beta=(25/6) * 4, tau=(25/300) * 1.75)`
 
 ### 📈 Your Skill Profile: Two Numbers That Matter
 
@@ -46,42 +46,43 @@ Each Arena match has 8 teams of 2 players (16 total players). Here's what happen
 3.  **Match prediction**: Based on all 8 teams' strengths, the system predicts how likely each team is to finish in each position (1st through 8th)
 4.  **After the match**: Rating changes depend on how your actual performance compared to what was expected
 
-### 🎯 Rating Changes: Why Some Games Matter More
+### 🎯 Rating Changes: How to Climb the Ladder
+
+**The BEST way to improve your rating is to finish in a better position against stronger opponents.**
 
 Your rating changes are based on:
 - **Expected vs. Actual performance**: Beating stronger teams gives more rating than expected, losing to weaker teams hurts more
 - **Uncertainty factor**: Players with higher uncertainty see bigger rating swings (this helps new players find their correct rating faster)
 
-### 👥 Team Contribution Distribution
+## 🛠️ Community-Driven Adjustments
 
-In duo matches, rating changes must be distributed between teammates. ArenaSweats uses OpenSkill TM's default uncertainty-based approach: teammates with higher uncertainty (less confident skill estimates) receive proportionally larger rating changes than teammates with lower uncertainty.
 
-## 🛠️ Community-Driven Modifications
+Arena is a complicated mode (8 teams, duos, boosting pressure, bravery, matchmaking limitations) so a ranking model out of the box will not fit this perfectly, Adjustments are needed on-top to keep the leaderboard fair and accurate.
 
-### 🚀 The "New Player" Rating Ramp-up
+As covered in [Principle #3](#-arenasweats-ranked-principles), ranked adjustments are community-driven and discussed on [Discord](https://discord.gg/BvGFJ4WEWg).
 
-There's one important modification to pure OpenSkill TM: **the rating ramp-up system**. Because new players start with high uncertainty, they could sometimes achieve artificially high ratings with just a few lucky games. To prevent this:
+There are currently 2 adjustments in place.
 
-- Players with 0 games get 50% of their calculated rating
-- This scales up linearly to 100% at 40 games played
-- This ensures the leaderboard accurately reflects sustained performance
+### Team Gap Modifier
 
-### 🛡️ Anti-Boost
+This adjustment applies in teams with at least one GM+ player. When they have a much lower-rated teammate, that game is treated as less informative for the higher-rated player. Specifically, the modifier starts when the lower teammate is below 90% of the higher teammate's μ, scales up as the gap widens, and reaches its cap once the lower teammate is at 20 μ. The result is lower gains and losses for the higher-rated player in those games.
 
-This system aims to prevent boosting by reducing the impact of games with significant skill or certainty disparities. It only takes effect when the season is at least 5 days old.
+In practice, the system recognizes it could not learn as much from that result, so uncertainty reduces less than usual or can even go up. That allows future games to carry potentially larger gains or losses.
 
-There are two cases where a game is flagged as "low impact":
+### Unbalanced Lobby Grace
 
-1.  **High Uncertainty Gap**: If the difference in uncertainty (σ) between two teammates is greater than 50% of the total sigma range, it is considered a low impact game for the higher rated player, who will experience **80% reduced rating gains and losses**.
-2.  **High Skill Gap**: If the weaker player's skill level (μ) is less than 40% of their stronger teammate's skill level, it is a low impact game. The higher rated player will experience **75-95% reduced rating gains and losses**.
+This adjustment only applies when **both** teammates are GM+. If that duo enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top duos.
+
+The grace is reduced for GM+ duos that have a big skill gap between them, and gets stronger for similarly-rated GM+ duos.
 
 ### 🏆 Your Final Rating
 
-Your displayed rating is calculated as: **(Skill Level - 3 × Uncertainty) × 100 × Games Scaling Factor**
+Your displayed rating is calculated as: **round((Skill Level - 3 × Uncertainty) × 75)**
 
 The "conservative estimate" approach (subtracting 3× uncertainty) is a recommended method which means your displayed rating is intentionally lower than your raw skill level - it represents what the system is confident you can achieve consistently.
 
-## 📁 Codebase Guide
+## 📁 Codebase Highlights
 
--   **visualizations**: This directory contains a simulator used to tune the parameters of the Anti-Boost system. It also includes a chart comparing the behavior of OpenSkill TM, TrueSkill, and our specific parameter set.
--   **ranking_algorithm.py**: This is the exact code that is used to update ratings for every game played. The file is commented with detailed information to explain exactly what the code does, and the code itself is available.
+-   **validations/openskill_sim**: Simulator code (`openskill_sim.py`, app/chart tooling, and helpers) used to validate behavior against production data.
+-   **ranking_algorithm.py**: **This is the exact code that is used to update ratings for every game played.** The file is commented with detailed information to explain exactly what the code does, and the code itself is available.
+
