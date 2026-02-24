@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
 
@@ -16,14 +17,19 @@ GAP_SATURATION_LOW_MU = 20.0
 # A team is considered "unbalanced" if its mu sum is above the lobby's
 # median team mu (any positive gap). The check is only performed for teams
 # where both players are GM+. For such teams we temporarily reduce their mu by
-# UNBALANCED_TEAM_MU_REDUCTION times the fractional gap before calling model.rate.
+# a smooth asymptotic curve before calling model.rate.
+# Linear baseline is UNBALANCED_TEAM_MU_REDUCTION * effective_gap_pct.
+# Production reduction is:
+# UNBALANCED_GRACE_ASYMPTOTE_Y * tanh((UNBALANCED_TEAM_MU_REDUCTION / UNBALANCED_GRACE_ASYMPTOTE_Y) * effective_gap_pct * UNBALANCED_GRACE_CURVE_SCALE)
 # The fractional gap is additionally scaled by (mu_low / mu_high) ** UNBALANCED_PAIR_RATIO_ALPHA
 # so larger teammate gaps receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
-UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 22% of the effective gap as a temporary mu reduction
+UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Linear slope baseline used inside the asymptotic grace curve
 UNBALANCED_PAIR_RATIO_ALPHA = 3.0
+UNBALANCED_GRACE_ASYMPTOTE_Y = 0.20
+UNBALANCED_GRACE_CURVE_SCALE = 0.95
 
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
@@ -153,6 +159,13 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
     If gm_team_any is provided, modifier is only evaluated for teams where at
     least one teammate is GM+.
     """
+    tau = getattr(model, "tau", None)
+    if tau is None:
+        raise RuntimeError("Rating model must expose 'tau' for prior->posterior sigma scaling.")
+    tau = float(tau)
+    if tau < 0.0:
+        raise ValueError(f"Invalid model.tau={tau}; expected tau >= 0.")
+
     for i in range(len(teams)):
         if gm_team_any is not None and not gm_team_any[i]:
             continue
@@ -195,14 +208,13 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
         if hi_pid is not None and gap_scale_by_pid is not None:
             gap_scale_by_pid[hi_pid] = scale
 
-        # Apply to both mu and sigma deltas for the higher player.
-        # Scaling sigma-delta as well means certainty is "used up" less in these
-        # low-information games, so future games can carry more learning.
+        # Apply to mu delta and to sigma's posterior-vs-prior movement only.
         delta_mu = hi_new.mu - hi_old.mu
-        delta_sigma = hi_new.sigma - hi_old.sigma
+        sigma_prior = math.sqrt(hi_old.sigma * hi_old.sigma + tau * tau)
+        sigma_delta_from_prior = hi_new.sigma - sigma_prior
 
         adj_mu = hi_old.mu + delta_mu * scale
-        adj_sigma = hi_old.sigma + delta_sigma * scale
+        adj_sigma = sigma_prior + sigma_delta_from_prior * scale
 
         hi_final = model.rating(mu=adj_mu, sigma=adj_sigma)
         lo_final = lo_new  # unchanged
@@ -239,6 +251,10 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
     """
     if not UNBALANCED_LOBBY_GRACE_ENABLED:
         return None, None
+    if UNBALANCED_GRACE_ASYMPTOTE_Y <= 0.0:
+        raise ValueError("UNBALANCED_GRACE_ASYMPTOTE_Y must be > 0")
+    if UNBALANCED_GRACE_CURVE_SCALE <= 0.0 or UNBALANCED_GRACE_CURVE_SCALE > 1.0:
+        raise ValueError("UNBALANCED_GRACE_CURVE_SCALE must be in (0, 1]")
 
     num_teams = len(teams)
     if num_teams == 0:
@@ -300,8 +316,10 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         if unbalanced_mask[idx]:
             adjusted_team = []
             for r in team_ratings:
-                # Reduction is scaled by team-vs-lobby gap and teammate pair-ratio.
-                reduction_pct = effective_gap_by_team[idx] * UNBALANCED_TEAM_MU_REDUCTION
+                # Reduction is scaled by team-vs-lobby gap and teammate pair-ratio,
+                # then tapered by a smooth asymptotic curve.
+                linear_scaled_gap = (UNBALANCED_TEAM_MU_REDUCTION / UNBALANCED_GRACE_ASYMPTOTE_Y) * effective_gap_by_team[idx]
+                reduction_pct = UNBALANCED_GRACE_ASYMPTOTE_Y * math.tanh(linear_scaled_gap * UNBALANCED_GRACE_CURVE_SCALE)
                 reductions[idx] = reduction_pct
                 adjusted_mu = r.mu * (1.0 - reduction_pct)
                 adjusted_team.append(model.rating(mu=adjusted_mu, sigma=r.sigma))
