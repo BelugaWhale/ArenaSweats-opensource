@@ -5,13 +5,12 @@ from openskill.models import ThurstoneMostellerFull
 # Global configuration for the team-gap modifier (historically named "penalty").
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
 #                         higher player's mu/sigma delta once fully reduced.
-# GAP_TRIGGER_LOW_MU_RATIO: no team-gap modifier while mu_low is at least this
-#                           fraction of mu_high (e.g. 0.90 means "within 10%").
-# GAP_SATURATION_LOW_MU: teammate mu value at which the modifier is fully
-#                        saturated at PENALTY_MIN_MULTIPLIER.
+# GAP_TRIGGER: relative mu gap threshold where scaling starts.
+# GAP_SATURATION: relative mu gap threshold where scaling saturates at
+#                 PENALTY_MIN_MULTIPLIER.
 PENALTY_MIN_MULTIPLIER = 0.05
-GAP_TRIGGER_LOW_MU_RATIO = 0.90
-GAP_SATURATION_LOW_MU = 20.0
+GAP_TRIGGER = 0.10
+GAP_SATURATION = 0.55
 
 # Unbalanced lobby configuration.
 # A team is considered "unbalanced" if its mu sum is above the lobby's
@@ -115,32 +114,21 @@ def instantiate_rating_model():
 
     return model
 
-def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
+def _teammate_penalty_scale(gap_pct: float) -> float:
     """
-    Compute the team-gap modifier multiplier for the high-mu player's
-    mu/sigma delta.
-
-    Behavior:
-    - No modifier while mu_lo >= 0.90 * mu_hi.
-    - Linear reduction between the trigger and mu_lo == 20.
-    - Full reduction at/below mu_lo == 20, capped by PENALTY_MIN_MULTIPLIER.
+    Compute the multiplier for the high-mu player's mu/sigma delta,
+    based on the relative mu gap in [0, 1].
     """
-    trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
-
-    # Within the trigger zone we do nothing.
-    if mu_lo >= trigger_low_mu:
+    # Below the trigger we do nothing.
+    if gap_pct <= GAP_TRIGGER:
         return 1.0
 
-    # At or below saturation we apply full reduction.
-    if mu_lo <= GAP_SATURATION_LOW_MU:
-        return PENALTY_MIN_MULTIPLIER
-
-    # Degenerate range: trigger and saturation overlap; treat as step.
-    if trigger_low_mu <= GAP_SATURATION_LOW_MU:
+    # At or above saturation, use the minimum multiplier (flat line).
+    if gap_pct >= GAP_SATURATION:
         return PENALTY_MIN_MULTIPLIER
 
     # Linear drop between trigger and saturation.
-    progress = (trigger_low_mu - mu_lo) / (trigger_low_mu - GAP_SATURATION_LOW_MU)
+    progress = (gap_pct - GAP_TRIGGER) / (GAP_SATURATION - GAP_TRIGGER)
     scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * progress
 
     # Clamp to safety range
@@ -183,17 +171,13 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
         if mu_hi <= 0.0:
             continue
 
-        trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
-        if mu_lo >= trigger_low_mu:
-            continue
-
         # Relative mu gap (scale-free), tracked for modifiers output.
         gap_pct = 1.0 - (mu_lo / mu_hi)
         if gap_pct <= 0.0:
             continue
 
         gap_pct = min(gap_pct, 1.0)
-        scale = _teammate_penalty_scale(mu_hi, mu_lo)
+        scale = _teammate_penalty_scale(gap_pct)
         hi_pid = None
         if team_player_ids is not None:
             ids = team_player_ids[i]
