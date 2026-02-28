@@ -61,7 +61,7 @@ Arena is a complicated mode (8 teams, duos, boosting pressure, bravery, matchmak
 
 As covered in [Principle #3](#-arenasweats-ranked-principles), ranked adjustments are community-driven and discussed on [Discord](https://discord.gg/BvGFJ4WEWg).
 
-There are currently 2 adjustments in place.
+There are currently 3 adjustments in place.
 
 ### Team Gap Modifier
 
@@ -74,6 +74,16 @@ In practice, the system recognizes it could not learn as much from that result, 
 This adjustment only applies when **both** teammates are GM+. If that duo enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top duos.
 
 The grace is reduced for GM+ duos that have a big skill gap between them, and gets stronger for similarly-rated GM+ duos.
+
+### Protection
+
+In order to support solo queue without indirectly buffing boosting, two forms of protection are added:
+
+**AFK Protection** - If a player places 8th and has a teammate with 0 kills, 0 assists, and less than 5000 damage dealt, that player's rating update is ignored for that game.
+
+**Place Protection** - This applies only to teams that are not 2 Grand Master+ players. Grand Master+ players never lose rating if they place 3rd or above. Players below Grand Master never lose rating if they place 4th or above.
+
+Protected loss is redistributed to eligible players in 5th-8th place, weighted by placement (8th pays the most, 5th the least).
 
 ### 🏆 Your Final Rating
 
