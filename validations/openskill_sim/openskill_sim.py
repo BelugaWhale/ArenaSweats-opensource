@@ -804,7 +804,7 @@ for place, team in placing_with_team:
             mu_hi, mu_lo = r1.mu, r0.mu
         if mu_hi > 0.0:
             gap_pct_val = max(0.0, min(1.0, 1.0 - (mu_lo / mu_hi)))
-            scale_val = _teammate_penalty_scale(mu_hi, mu_lo)
+            scale_val = _teammate_penalty_scale(gap_pct_val)
         else:
             gap_pct_val = 0.0
             scale_val = 1.0
@@ -1214,7 +1214,7 @@ for pid in sorted(before_ratings.keys()):
 gap_curve_xs = list(range(101))
 gap_curve_mu_high_reference = 40.0
 gap_curve_ys = [
-    _teammate_penalty_scale(gap_curve_mu_high_reference, gap_curve_mu_high_reference * (1.0 - (x / 100.0))) * 100.0
+    _teammate_penalty_scale(x / 100.0) * 100.0
     for x in gap_curve_xs
 ]
 

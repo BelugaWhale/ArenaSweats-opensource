@@ -3,11 +3,7 @@ import tkinter as tk
 from tkinter import messagebox
 from tkinter import ttk
 
-from ranking_algorithm import (
-    GAP_SATURATION_LOW_MU,
-    GAP_TRIGGER_LOW_MU_RATIO,
-    PENALTY_MIN_MULTIPLIER,
-)
+from ranking_algorithm import PENALTY_MIN_MULTIPLIER
 
 try:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -19,8 +15,8 @@ except Exception:
 
 
 DEFAULT_MU_HIGH = 40.0
-DEFAULT_TRIGGER_LOW_MU_RATIO = GAP_TRIGGER_LOW_MU_RATIO
-DEFAULT_SATURATION_LOW_MU = GAP_SATURATION_LOW_MU
+DEFAULT_TRIGGER_LOW_MU_RATIO = 0.90
+DEFAULT_SATURATION_LOW_MU = 20.0
 # Legacy relative-gap curve constants used for experiment charting.
 GAP_TRIGGER = 0.10
 GAP_SATURATION = 0.55

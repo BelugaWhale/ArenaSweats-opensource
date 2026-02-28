@@ -26,6 +26,9 @@ from experiments.experiment_team_gap_curve_compare import install_tab as install
 from experiments.experiment_unbalanced_lobby_grace import install_tab as install_unbalanced_lobby_grace_tab
 from experiments.experiment_unbalanced_pair_alpha_compare import install_tab as install_unbalanced_pair_alpha_compare_tab
 from experiments.experiment_afk_damage_histogram import install_tab as install_afk_damage_histogram_tab
+from experiments.experiment_afk_placing_distribution import install_tab as install_afk_placing_distribution_tab
+from experiments.experiment_unbalanced_inflation_solo_safety import install_tab as install_unbalanced_inflation_solo_safety_tab
+from experiments.experiment_emerald_or_below_placing_boxplot import install_tab as install_emerald_or_below_placing_boxplot_tab
 
 REGION_TO_CH_PREFIX = {
     "euw": "DBCH",
@@ -74,6 +77,16 @@ if not hasattr(private_ch, "load_team_gap_percentiles_dataset"):
 if not hasattr(private_ch, "load_afk_damage_histogram_dataset"):
     raise RuntimeError(
         "Missing load_afk_damage_histogram_dataset(region, ch_prefix, season='live', ...) "
+        "in openskill_sim_ch_private.py"
+    )
+if not hasattr(private_ch, "load_afk_placing_distribution_dataset"):
+    raise RuntimeError(
+        "Missing load_afk_placing_distribution_dataset(region, ch_prefix, season='live', ...) "
+        "in openskill_sim_ch_private.py"
+    )
+if not hasattr(private_ch, "load_unbalanced_inflation_solo_safety_dataset"):
+    raise RuntimeError(
+        "Missing load_unbalanced_inflation_solo_safety_dataset(region, ch_prefix, season='live', ...) "
         "in openskill_sim_ch_private.py"
     )
 
@@ -351,6 +364,27 @@ unbalanced_pair_alpha_experiment = install_unbalanced_pair_alpha_compare_tab(
     log_console=lambda message: sys.stdout.write(f"{message}\n"),
 )
 afk_damage_experiment = install_afk_damage_histogram_tab(
+    experiment_notebook=experiment_notebook,
+    private_ch=private_ch,
+    region_to_ch_prefix=REGION_TO_CH_PREFIX,
+    set_status=lambda text: (status_var.set(text), root.update_idletasks()),
+    log_console=lambda message: sys.stdout.write(f"{message}\n"),
+)
+afk_placing_experiment = install_afk_placing_distribution_tab(
+    experiment_notebook=experiment_notebook,
+    private_ch=private_ch,
+    region_to_ch_prefix=REGION_TO_CH_PREFIX,
+    set_status=lambda text: (status_var.set(text), root.update_idletasks()),
+    log_console=lambda message: sys.stdout.write(f"{message}\n"),
+)
+unbalanced_inflation_solo_safety_experiment = install_unbalanced_inflation_solo_safety_tab(
+    experiment_notebook=experiment_notebook,
+    private_ch=private_ch,
+    region_to_ch_prefix=REGION_TO_CH_PREFIX,
+    set_status=lambda text: (status_var.set(text), root.update_idletasks()),
+    log_console=lambda message: sys.stdout.write(f"{message}\n"),
+)
+emerald_or_below_placing_boxplot_experiment = install_emerald_or_below_placing_boxplot_tab(
     experiment_notebook=experiment_notebook,
     private_ch=private_ch,
     region_to_ch_prefix=REGION_TO_CH_PREFIX,
@@ -1114,6 +1148,10 @@ def open_experiments_view():
             unbalanced_lobby_experiment["run_query"]()
         if afk_damage_experiment and selected_text == afk_damage_experiment["tab_text"]:
             afk_damage_experiment["run_query"]()
+        if afk_placing_experiment and selected_text == afk_placing_experiment["tab_text"]:
+            afk_placing_experiment["run_query"]()
+        if emerald_or_below_placing_boxplot_experiment and selected_text == emerald_or_below_placing_boxplot_experiment["tab_text"]:
+            emerald_or_below_placing_boxplot_experiment["run_query"]()
     except Exception as exc:
         log_exception("open_experiments_view failed", exc)
         messagebox.showerror("Experiment Failed", str(exc))
@@ -1138,6 +1176,10 @@ def on_experiment_tab_changed(_event=None):
             unbalanced_lobby_experiment["run_query"]()
         if afk_damage_experiment and selected_text == afk_damage_experiment["tab_text"]:
             afk_damage_experiment["run_query"]()
+        if afk_placing_experiment and selected_text == afk_placing_experiment["tab_text"]:
+            afk_placing_experiment["run_query"]()
+        if emerald_or_below_placing_boxplot_experiment and selected_text == emerald_or_below_placing_boxplot_experiment["tab_text"]:
+            emerald_or_below_placing_boxplot_experiment["run_query"]()
     except Exception as exc:
         log_exception("on_experiment_tab_changed failed", exc)
         messagebox.showerror("Experiment Failed", str(exc))

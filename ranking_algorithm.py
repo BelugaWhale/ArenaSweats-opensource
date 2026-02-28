@@ -24,7 +24,6 @@ GAP_SATURATION = 0.55
 UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 22% of the effective gap as a temporary mu reduction
 UNBALANCED_PAIR_RATIO_ALPHA = 3.0
-
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
 Each player is represented by:
@@ -357,6 +356,8 @@ def process_game_ratings(
         - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a modified team, 0.0 otherwise.
         - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no modifier.
         - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
+        - protection_net: Net points from placement protection/debt redistribution.
+          Positive means received protection; negative means paid donor debt.
     """
     
     # Verify exactly 16 players
@@ -449,25 +450,89 @@ def process_game_ratings(
             gap_scale_by_pid=gap_scale_by_pid,
         )
 
+        if afk_protected_pids:
+            for i in range(len(teams)):
+                team_players = team_player_ids[i]
+                if team_players[0] in afk_protected_pids:
+                    new_teams[i][0] = teams[i][0]
+                if team_players[1] in afk_protected_pids:
+                    new_teams[i][1] = teams[i][1]
+
         sorted_placings = sorted(teams_by_placing.keys())
+        protection_net_by_pid = {}
+        donor_entries = []
+        debt_mu = 0.0
+        debt_sigma = 0.0
+
+        for i, placing in enumerate(sorted_placings):
+            team_players = teams_by_placing[placing]
+            team_is_double_gm = gm_team_both[i]
+            for team_player_index, pid in enumerate(team_players):
+                protection_net_by_pid[pid] = 0
+                if team_is_double_gm:
+                    continue
+                if afk_protected_pids and pid in afk_protected_pids:
+                    continue
+                pre_rating = teams[i][team_player_index]
+                post_rating = new_teams[i][team_player_index]
+                pre_display = int(calculate_rating(pre_rating))
+                post_display = int(calculate_rating(post_rating))
+                base_delta = int(round(post_display - pre_display))
+                base_delta_mu = post_rating.mu - pre_rating.mu
+                base_delta_sigma = post_rating.sigma - pre_rating.sigma
+
+                is_gm = pid in gm_set if gm_set is not None else False
+                protection_cap = 3 if is_gm else 4
+
+                if placing <= protection_cap and base_delta < 0:
+                    new_teams[i][team_player_index] = pre_rating
+                    debt_mu += base_delta_mu
+                    debt_sigma += base_delta_sigma
+                    protection_net_by_pid[pid] += -base_delta
+                    continue
+
+                if placing >= 5 and placing <= 8:
+                    donor_weight = float(placing - 4)
+                    donor_entries.append((i, team_player_index, pid, donor_weight))
+
+        if abs(debt_mu) > 1e-12 or abs(debt_sigma) > 1e-12:
+            weight_total = sum(entry[3] for entry in donor_entries)
+            if weight_total <= 0.0:
+                raise RuntimeError(
+                    f"Game {game_id}: place-protection debt exists (mu={debt_mu}, sigma={debt_sigma}) "
+                    f"but no eligible 5th-8th donors"
+                )
+
+            for i, team_player_index, pid, donor_weight in donor_entries:
+                donor_rating_before = new_teams[i][team_player_index]
+                donor_share = donor_weight / weight_total
+                donor_mu = donor_rating_before.mu + (debt_mu * donor_share)
+                donor_sigma = donor_rating_before.sigma + (debt_sigma * donor_share)
+                if donor_sigma <= 0.0:
+                    raise RuntimeError(
+                        f"Game {game_id}: donor sigma became non-positive for pid={pid} "
+                        f"(sigma={donor_sigma}, debt_sigma={debt_sigma}, share={donor_share})"
+                    )
+                donor_rating_after = model.rating(mu=donor_mu, sigma=donor_sigma)
+                new_teams[i][team_player_index] = donor_rating_after
+                donor_display_before = int(calculate_rating(donor_rating_before))
+                donor_display_after = int(calculate_rating(donor_rating_after))
+                protection_net_by_pid[pid] -= donor_display_before - donor_display_after
+
         modifiers = {}
         # Index i corresponds to team position in teams/new_teams/unbalanced_reductions
         # because all three were built by iterating sorted(teams_by_placing.keys()).
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
             new_team = new_teams[i]
-            if afk_protected_pids:
-                if team_players[0] in afk_protected_pids:
-                    new_team[0] = teams[i][0]
-                if team_players[1] in afk_protected_pids:
-                    new_team[1] = teams[i][1]
             player_ratings[team_players[0]] = new_team[0]
             player_ratings[team_players[1]] = new_team[1]
             for pid in team_players:
                 modifiers[pid] = {
                     "gap_pct": gap_pct_by_pid.get(pid, 0.0),
                     "gap_scale": gap_scale_by_pid.get(pid, 1.0),
-                    "unbalanced_reduction_pct": unbalanced_reductions[i]
+                    "unbalanced_reduction_pct": unbalanced_reductions[i],
+                    "protection_net": protection_net_by_pid.get(pid, 0),
                 }
 
         return True, player_ratings, modifiers
