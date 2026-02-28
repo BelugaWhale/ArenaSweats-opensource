@@ -335,6 +335,7 @@ def process_game_ratings(
     player_ratings,
     logger,
     gm_set,
+    afk_protected_pids=None,
 ):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
@@ -347,6 +348,7 @@ def process_game_ratings(
         player_ratings: Dictionary of player_id -> Rating
         logger: Logger instance
         gm_set: Set of player_ids considered GM+ for this game's processing
+        afk_protected_pids: Optional set of player_ids whose mu/sigma changes should be zeroed
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
@@ -454,6 +456,11 @@ def process_game_ratings(
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
             new_team = new_teams[i]
+            if afk_protected_pids:
+                if team_players[0] in afk_protected_pids:
+                    new_team[0] = teams[i][0]
+                if team_players[1] in afk_protected_pids:
+                    new_team[1] = teams[i][1]
             player_ratings[team_players[0]] = new_team[0]
             player_ratings[team_players[1]] = new_team[1]
             for pid in team_players:
