@@ -166,7 +166,7 @@ def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
     # Clamp to safety range
     return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
 
-def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None, recent_teammate_repeat_by_team=None):
+def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None, recent_teammate_repeat_by_pid=None):
     """
     Apply the team-gap modifier by scaling the higher-mu player's update in
     teams with large teammate mu gaps.
@@ -209,14 +209,14 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
             continue
 
         gap_pct = min(gap_pct, 1.0)
-        if recent_teammate_repeat_by_team is None or recent_teammate_repeat_by_team[i]:
-            scale = _teammate_penalty_scale_gap_pct(gap_pct)
-        else:
-            scale = _teammate_penalty_scale(mu_hi, mu_lo)
         hi_pid = None
         if team_player_ids is not None:
             ids = team_player_ids[i]
             hi_pid = ids[0] if hi_index == 0 else ids[1]
+        if recent_teammate_repeat_by_pid is None or hi_pid is None or recent_teammate_repeat_by_pid.get(hi_pid, False):
+            scale = _teammate_penalty_scale_gap_pct(gap_pct)
+        else:
+            scale = _teammate_penalty_scale(mu_hi, mu_lo)
         if hi_pid is not None and gap_pct_by_pid is not None:
             gap_pct_by_pid[hi_pid] = gap_pct
         if hi_pid is not None and gap_scale_by_pid is not None:
@@ -371,7 +371,7 @@ def process_game_ratings(
     logger,
     gm_set,
     afk_protected_pids=None,
-    recent_teammate_repeat_by_team=None,
+    recent_teammate_repeat_by_pid=None,
 ):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
@@ -385,9 +385,10 @@ def process_game_ratings(
         logger: Logger instance
         gm_set: Set of player_ids considered GM+ for this game's processing
         afk_protected_pids: Optional set of player_ids whose mu/sigma changes should be zeroed
-        recent_teammate_repeat_by_team: Optional list[bool] aligned with teams in placing order.
-            True means the team has played together in the player's last 3 games and uses the
-            existing gap_pct curve. False means the team uses the low-mu trigger curve.
+        recent_teammate_repeat_by_pid: Optional dict[player_id, bool].
+            The teammate-gap modifier only scales the higher-mu player's delta, so the
+            curve choice is keyed off that specific player's recent-teammate history.
+            True uses the existing gap_pct curve. False uses the low-mu trigger curve.
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
@@ -488,7 +489,7 @@ def process_game_ratings(
             team_player_ids=team_player_ids,
             gap_pct_by_pid=gap_pct_by_pid,
             gap_scale_by_pid=gap_scale_by_pid,
-            recent_teammate_repeat_by_team=recent_teammate_repeat_by_team,
+            recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
         )
 
         if afk_protected_pids:
