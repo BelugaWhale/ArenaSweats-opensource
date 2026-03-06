@@ -11,6 +11,8 @@ from openskill.models import ThurstoneMostellerFull
 PENALTY_MIN_MULTIPLIER = 0.05
 GAP_TRIGGER = 0.10
 GAP_SATURATION = 0.55
+GAP_TRIGGER_LOW_MU_RATIO = 0.90
+GAP_SATURATION_LOW_MU = 20.0
 
 # Unbalanced lobby configuration.
 # A team is considered "unbalanced" if its mu sum is above the lobby's
@@ -113,7 +115,7 @@ def instantiate_rating_model():
 
     return model
 
-def _teammate_penalty_scale(gap_pct: float) -> float:
+def _teammate_penalty_scale_gap_pct(gap_pct: float) -> float:
     """
     Compute the multiplier for the high-mu player's mu/sigma delta,
     based on the relative mu gap in [0, 1].
@@ -133,7 +135,38 @@ def _teammate_penalty_scale(gap_pct: float) -> float:
     # Clamp to safety range
     return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
 
-def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None):
+def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
+    """
+    Compute the team-gap modifier multiplier for the high-mu player's
+    mu/sigma delta.
+
+    Behavior:
+    - No modifier while mu_lo >= 0.90 * mu_hi.
+    - Linear reduction between the trigger and mu_lo == 20.
+    - Full reduction at/below mu_lo == 20, capped by PENALTY_MIN_MULTIPLIER.
+    """
+    trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
+
+    # Within the trigger zone we do nothing.
+    if mu_lo >= trigger_low_mu:
+        return 1.0
+
+    # At or below saturation we apply full reduction.
+    if mu_lo <= GAP_SATURATION_LOW_MU:
+        return PENALTY_MIN_MULTIPLIER
+
+    # Degenerate range: trigger and saturation overlap; treat as step.
+    if trigger_low_mu <= GAP_SATURATION_LOW_MU:
+        return PENALTY_MIN_MULTIPLIER
+
+    # Linear drop between trigger and saturation.
+    progress = (trigger_low_mu - mu_lo) / (trigger_low_mu - GAP_SATURATION_LOW_MU)
+    scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * progress
+
+    # Clamp to safety range
+    return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
+
+def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None, recent_teammate_repeat_by_team=None):
     """
     Apply the team-gap modifier by scaling the higher-mu player's update in
     teams with large teammate mu gaps.
@@ -176,7 +209,10 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
             continue
 
         gap_pct = min(gap_pct, 1.0)
-        scale = _teammate_penalty_scale(gap_pct)
+        if recent_teammate_repeat_by_team is None or recent_teammate_repeat_by_team[i]:
+            scale = _teammate_penalty_scale_gap_pct(gap_pct)
+        else:
+            scale = _teammate_penalty_scale(mu_hi, mu_lo)
         hi_pid = None
         if team_player_ids is not None:
             ids = team_player_ids[i]
@@ -335,6 +371,7 @@ def process_game_ratings(
     logger,
     gm_set,
     afk_protected_pids=None,
+    recent_teammate_repeat_by_team=None,
 ):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
@@ -348,6 +385,9 @@ def process_game_ratings(
         logger: Logger instance
         gm_set: Set of player_ids considered GM+ for this game's processing
         afk_protected_pids: Optional set of player_ids whose mu/sigma changes should be zeroed
+        recent_teammate_repeat_by_team: Optional list[bool] aligned with teams in placing order.
+            True means the team has played together in the player's last 3 games and uses the
+            existing gap_pct curve. False means the team uses the low-mu trigger curve.
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
@@ -448,6 +488,7 @@ def process_game_ratings(
             team_player_ids=team_player_ids,
             gap_pct_by_pid=gap_pct_by_pid,
             gap_scale_by_pid=gap_scale_by_pid,
+            recent_teammate_repeat_by_team=recent_teammate_repeat_by_team,
         )
 
         if afk_protected_pids:

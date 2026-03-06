@@ -29,6 +29,7 @@ from experiments.experiment_afk_damage_histogram import install_tab as install_a
 from experiments.experiment_afk_placing_distribution import install_tab as install_afk_placing_distribution_tab
 from experiments.experiment_unbalanced_inflation_solo_safety import install_tab as install_unbalanced_inflation_solo_safety_tab
 from experiments.experiment_emerald_or_below_placing_boxplot import install_tab as install_emerald_or_below_placing_boxplot_tab
+from experiments.experiment_lobby_quality import install_tab as install_lobby_quality_tab
 
 REGION_TO_CH_PREFIX = {
     "euw": "DBCH",
@@ -89,10 +90,19 @@ if not hasattr(private_ch, "load_unbalanced_inflation_solo_safety_dataset"):
         "Missing load_unbalanced_inflation_solo_safety_dataset(region, ch_prefix, season='live', ...) "
         "in openskill_sim_ch_private.py"
     )
+if not hasattr(private_ch, "load_lobby_quality_dataset"):
+    raise RuntimeError(
+        "Missing load_lobby_quality_dataset(region, ch_prefix, season='live', ...) "
+        "in openskill_sim_ch_private.py"
+    )
 
 root = tk.Tk()
 root.title("ArenaSweats OpenSkill Debugger")
-root.geometry("1780x980")
+screen_width = root.winfo_screenwidth()
+screen_height = root.winfo_screenheight()
+window_width = min(1780, max(1200, screen_width - 80))
+window_height = min(980, max(760, screen_height - 120))
+root.geometry(f"{window_width}x{window_height}+20+20")
 root.configure(bg="#0f141b")
 
 style = ttk.Style()
@@ -385,6 +395,13 @@ unbalanced_inflation_solo_safety_experiment = install_unbalanced_inflation_solo_
     log_console=lambda message: sys.stdout.write(f"{message}\n"),
 )
 emerald_or_below_placing_boxplot_experiment = install_emerald_or_below_placing_boxplot_tab(
+    experiment_notebook=experiment_notebook,
+    private_ch=private_ch,
+    region_to_ch_prefix=REGION_TO_CH_PREFIX,
+    set_status=lambda text: (status_var.set(text), root.update_idletasks()),
+    log_console=lambda message: sys.stdout.write(f"{message}\n"),
+)
+lobby_quality_experiment = install_lobby_quality_tab(
     experiment_notebook=experiment_notebook,
     private_ch=private_ch,
     region_to_ch_prefix=REGION_TO_CH_PREFIX,
@@ -1152,6 +1169,8 @@ def open_experiments_view():
             afk_placing_experiment["run_query"]()
         if emerald_or_below_placing_boxplot_experiment and selected_text == emerald_or_below_placing_boxplot_experiment["tab_text"]:
             emerald_or_below_placing_boxplot_experiment["run_query"]()
+        if lobby_quality_experiment and selected_text == lobby_quality_experiment["tab_text"]:
+            lobby_quality_experiment["run_query"]()
     except Exception as exc:
         log_exception("open_experiments_view failed", exc)
         messagebox.showerror("Experiment Failed", str(exc))
@@ -1180,6 +1199,8 @@ def on_experiment_tab_changed(_event=None):
             afk_placing_experiment["run_query"]()
         if emerald_or_below_placing_boxplot_experiment and selected_text == emerald_or_below_placing_boxplot_experiment["tab_text"]:
             emerald_or_below_placing_boxplot_experiment["run_query"]()
+        if lobby_quality_experiment and selected_text == lobby_quality_experiment["tab_text"]:
+            lobby_quality_experiment["run_query"]()
     except Exception as exc:
         log_exception("on_experiment_tab_changed failed", exc)
         messagebox.showerror("Experiment Failed", str(exc))

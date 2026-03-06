@@ -1,3 +1,4 @@
 .env
 *.cpython-311.pyc
 validations/openskill_sim/openskill_sim_ch_private.py
+*.pyc
