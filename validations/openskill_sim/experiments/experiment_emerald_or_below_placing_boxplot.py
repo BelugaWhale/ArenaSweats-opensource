@@ -78,7 +78,7 @@ def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status
     subtitle = ttk.Label(
         frame,
         text=(
-            "Two charts: baseline and adjusted. Filter keeps teams with exactly one Diamond/Master/Grand Master/"
+            "Two charts: baseline and adjusted. Filter keeps teams with exactly one Diamond/Master/Grandmaster/"
             "Challenger player plus one Emerald-or-below player, then uses only the Emerald-or-below rating_change. "
             "Adjustment floors negative deltas at places 3/4 to 0 and applies a calibrated heavier loss multiplier at 5-8."
         ),

@@ -540,7 +540,7 @@ def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status
                 min_games=DEFAULT_MIN_GAMES,
                 mu_bin_size=DEFAULT_MU_BIN_SIZE,
                 gap_bin_size=DEFAULT_GAP_BIN_SIZE,
-                rank_filter=["Grand Master", "Challenger"],
+                rank_filter=["Grandmaster", "Challenger"],
                 require_protagonist=protagonist_only,
                 require_positive_gap=require_positive_gap,
             )

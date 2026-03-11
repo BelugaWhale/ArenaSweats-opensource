@@ -81,7 +81,7 @@ In order to support solo queue without indirectly buffing boosting, two forms of
 
 **AFK Protection** - If a player places 8th and has a teammate with 0 kills, 0 assists, and less than 5000 damage dealt, that player's rating update is ignored for that game.
 
-**Place Protection** - This applies only to teams that are not 2 Grand Master+ players. Grand Master+ players never lose rating if they place 3rd or above. Players below Grand Master never lose rating if they place 4th or above.
+**Place Protection** - This applies only to teams that are not 2 Grandmaster+ players. Grandmaster+ players never lose rating if they place 3rd or above. Players below Grandmaster never lose rating if they place 4th or above.
 
 Protected loss is redistributed to eligible players in 5th-8th place, weighted by placement (8th pays the most, 5th the least).
 
