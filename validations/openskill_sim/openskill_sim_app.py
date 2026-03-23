@@ -31,25 +31,12 @@ from experiments.experiment_unbalanced_inflation_solo_safety import install_tab 
 from experiments.experiment_emerald_or_below_placing_boxplot import install_tab as install_emerald_or_below_placing_boxplot_tab
 from experiments.experiment_lobby_quality import install_tab as install_lobby_quality_tab
 
-REGION_TO_CH_PREFIX = {
-    "euw": "DBCH",
-    "br": "DBCH",
-    "sea": "DBCH",
-    "ru": "DBCH",
-    "me": "DBCH",
-    "na": "SCRAPECH",
-    "vn": "SCRAPECH",
-    "las": "SCRAPECH",
-    "tr": "SCRAPECH",
-    "oce": "SCRAPECH",
-    "kr": "SPLITCH",
-    "eune": "SPLITCH",
-    "lan": "SPLITCH",
-    "tw": "SPLITCH",
-    "jp": "SPLITCH",
-}
-
 private_ch = importlib.import_module("openskill_sim_ch_private")
+if not hasattr(private_ch, "REGION_TO_CH_PREFIX"):
+    raise RuntimeError("Missing REGION_TO_CH_PREFIX in openskill_sim_ch_private.py")
+REGION_TO_CH_PREFIX = private_ch.REGION_TO_CH_PREFIX
+if not isinstance(REGION_TO_CH_PREFIX, dict) or not REGION_TO_CH_PREFIX:
+    raise RuntimeError("REGION_TO_CH_PREFIX in openskill_sim_ch_private.py must be a non-empty dict")
 if not hasattr(private_ch, "list_player_games_exact"):
     raise RuntimeError(
         "Missing list_player_games_exact(player_name, region, ch_prefix, limit, season='live') "

@@ -120,27 +120,6 @@ def apply_sigma_cap_algo(model, teams, gm_team_any, team_player_ids, logger):
     return rate_input, sigma_cap_scale_by_pid
 
 
-# ----------------------------------------------------------------------
-# INPUTS
-# ----------------------------------------------------------------------
-region_to_ch_prefix = {
-    "euw": "DBCH",
-    "br": "DBCH",
-    "sea": "DBCH",
-    "ru": "DBCH",
-    "me": "DBCH",
-    "na": "SCRAPECH",
-    "vn": "SCRAPECH",
-    "las": "SCRAPECH",
-    "tr": "SCRAPECH",
-    "oce": "SCRAPECH",
-    "kr": "SPLITCH",
-    "eune": "SPLITCH",
-    "lan": "SPLITCH",
-    "tw": "SPLITCH",
-    "jp": "SPLITCH",
-}
-
 parser = argparse.ArgumentParser(
     description="Run OpenSkill validation sim using either a local JSON input or a direct ClickHouse game pull."
 )
@@ -148,7 +127,7 @@ parser.add_argument("--input", help="Path to sim input JSON. Defaults to validat
 parser.add_argument("input_positional", nargs="?", help=argparse.SUPPRESS)
 parser.add_argument("--game-id", help="Target game_id to pull from ClickHouse.")
 parser.add_argument("--region", help="Region for ClickHouse tables (for example: euw, na, oce).")
-parser.add_argument("--ch-prefix", help="Optional env prefix override (for example: DBCH, SCRAPECH, SPLITCH).")
+parser.add_argument("--ch-prefix", help="Optional env prefix override (for example: HORIZONCH, EAGLECH, DBCH, SCRAPECH, SPLITCH).")
 parser.add_argument("--save-input", help="Optional path to save the fetched ClickHouse game in sim-input JSON format.")
 parser.add_argument("--export-report", help="Optional path to write a machine-readable JSON report for UI consumers.")
 parser.add_argument("--no-charts", action="store_true", help="Disable chart rendering and experiment plots.")
@@ -175,11 +154,6 @@ if args.game_id or args.region:
     if not region:
         raise ValueError("Region cannot be empty.")
 
-    ch_prefix = (args.ch_prefix or region_to_ch_prefix.get(region, "")).strip().upper()
-    if not ch_prefix:
-        known_regions = ", ".join(sorted(region_to_ch_prefix.keys()))
-        raise ValueError(f"Unknown region '{region}'. Known regions: {known_regions}")
-
     try:
         private_ch_loader = importlib.import_module("openskill_sim_ch_private")
     except Exception as e:
@@ -193,6 +167,17 @@ if args.game_id or args.region:
         raise RuntimeError(
             "Module openskill_sim_ch_private is missing load_sim_input_from_clickhouse(game_id, region, ch_prefix)."
         )
+    if not hasattr(private_ch_loader, "REGION_TO_CH_PREFIX"):
+        raise RuntimeError("Module openskill_sim_ch_private is missing REGION_TO_CH_PREFIX.")
+
+    region_to_ch_prefix = private_ch_loader.REGION_TO_CH_PREFIX
+    if not isinstance(region_to_ch_prefix, dict) or not region_to_ch_prefix:
+        raise RuntimeError("REGION_TO_CH_PREFIX in openskill_sim_ch_private.py must be a non-empty dict.")
+
+    ch_prefix = (args.ch_prefix or region_to_ch_prefix.get(region, "")).strip().upper()
+    if not ch_prefix:
+        known_regions = ", ".join(sorted(region_to_ch_prefix.keys()))
+        raise ValueError(f"Unknown region '{region}'. Known regions: {known_regions}")
 
     data = private_ch_loader.load_sim_input_from_clickhouse(game_id=game_id, region=region, ch_prefix=ch_prefix)
     if not isinstance(data, dict):
