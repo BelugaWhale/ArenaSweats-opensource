@@ -25,6 +25,7 @@ import ranking_algorithm as ranking_algo
 from ranking_algorithm import (
     apply_teammate_gap_penalty,
     _teammate_penalty_scale,
+    _teammate_penalty_scale_gap_pct,
     _unbalanced_pair_ratio_scale,
     UNBALANCED_TEAM_MU_REDUCTION,
     UNBALANCED_PAIR_RATIO_ALPHA,
@@ -221,6 +222,10 @@ if not target_games:
 required_modifier_keys = {"sigma_cap_scale", "team_gap_pct", "team_gap_scale", "unbalanced_reduction_pct"}
 gm_set = set()
 target_game_ids = set()
+recent_teammate_repeat_by_pid = data.get("recent_teammate_repeat_by_pid")
+if recent_teammate_repeat_by_pid is not None:
+    recent_teammate_repeat_by_pid = {str(pid): bool(value) for pid, value in recent_teammate_repeat_by_pid.items()}
+target_games_have_recent_teammate_repeat = any("recent_teammate_repeat" in tg for tg in target_games)
 for tg in target_games:
     pid = tg.get("player_id")
     if not pid:
@@ -239,9 +244,17 @@ for tg in target_games:
     target_game_ids.add(pid)
     if not (is_default_sigma and is_default_gap_pct and is_default_gap_scale and is_default_unbalanced):
         gm_set.add(pid)
+    if target_games_have_recent_teammate_repeat:
+        if "recent_teammate_repeat" not in tg:
+            raise ValueError("target_games must include recent_teammate_repeat for every player when any row includes it.")
+        if recent_teammate_repeat_by_pid is None:
+            recent_teammate_repeat_by_pid = {}
+        recent_teammate_repeat_by_pid[str(pid)] = bool(tg["recent_teammate_repeat"])
 
 if target_game_ids != {p["id"] for p in players}:
     raise ValueError("target_games must include modifiers for all 16 players.")
+if recent_teammate_repeat_by_pid is not None and set(recent_teammate_repeat_by_pid.keys()) != {str(p["id"]) for p in players}:
+    raise ValueError("recent_teammate_repeat_by_pid must include all 16 players when provided.")
 
 gm_mask_provided = True
 
@@ -333,6 +346,7 @@ success, production_map, _ = process_game_ratings(
     player_ratings_input,
     ranking_logger,
     gm_for_process,
+    recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
 )
 if not success:
     raise RuntimeError("Ranking algorithm pipeline failed for the simulated game.")
@@ -566,6 +580,8 @@ def run_pipeline(apply_sigma_cap=False, apply_unbalanced=False, apply_gap_penalt
             new_teams_local,
             logger=None,
             gm_team_any=current_gm_any if gm_mask_provided else None,
+            team_player_ids=team_order_ids if gm_mask_provided else None,
+            recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
         )
 
     after_local = dict(before_ratings)
@@ -739,6 +755,8 @@ else:
 # GAP-PENALTY summary table (ordered by placing)
 # ----------------------------------------------------------------------
 gap_new_teams = [pair.copy() for pair in new_teams]
+gap_pct_by_pid = {}
+gap_scale_by_pid = {}
 apply_teammate_gap_penalty(
     model,
     teams_ratings,
@@ -746,6 +764,9 @@ apply_teammate_gap_penalty(
     logger=None,
     gm_team_any=gm_team_any if gm_mask_provided else None,
     team_player_ids=team_order_ids if gm_mask_provided else None,
+    gap_pct_by_pid=gap_pct_by_pid,
+    gap_scale_by_pid=gap_scale_by_pid,
+    recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
 )
 
 gap_after = dict(before_ratings)
@@ -772,30 +793,42 @@ headers_gap = [
     "postgame_player_stats",
     "rating_change",
     "rating_change_diff",
-    "mu_gap",
+    "mu_gap_repeat",
+    "mu_gap_norepeat",
 ]
 rows_gap = []
 gap_rating_change_by_pid = {}
 gap_rating_diff_by_pid = {}
+gap_repeat_by_pid = {}
+gap_norepeat_by_pid = {}
 
 for place, team in placing_with_team:
+    if gm_mask_provided and not gm_team_any[place - 1]:
+        continue
     r0 = before_ratings[team[0]]
     r1 = before_ratings[team[1]]
-    show_gap = gm_team_any[place - 1] if gm_mask_provided else True
-    if show_gap:
-        if r0.mu >= r1.mu:
-            mu_hi, mu_lo = r0.mu, r1.mu
-        else:
-            mu_hi, mu_lo = r1.mu, r0.mu
-        if mu_hi > 0.0:
-            gap_pct_val = max(0.0, min(1.0, 1.0 - (mu_lo / mu_hi)))
-            scale_val = _teammate_penalty_scale(gap_pct_val)
-        else:
-            gap_pct_val = 0.0
-            scale_val = 1.0
+    if r0.mu >= r1.mu:
+        hi_pid, hi_rating, lo_rating = team[0], r0, r1
     else:
-        gap_pct_val = None
-        scale_val = None
+        hi_pid, hi_rating, lo_rating = team[1], r1, r0
+    gap_pct_val = gap_pct_by_pid.get(hi_pid)
+    scale_val = gap_scale_by_pid.get(hi_pid)
+    if gap_pct_val is None or scale_val is None:
+        continue
+    relative_scale = _teammate_penalty_scale_gap_pct(gap_pct_val)
+    low_mu_scale = _teammate_penalty_scale(hi_rating.mu, lo_rating.mu)
+    trigger_low_mu = hi_rating.mu * ranking_algo.GAP_TRIGGER_LOW_MU_RATIO
+    if lo_rating.mu >= trigger_low_mu:
+        low_mu_gap_pct = 0.0
+    elif lo_rating.mu <= ranking_algo.GAP_SATURATION_LOW_MU:
+        low_mu_gap_pct = 1.0
+    else:
+        low_mu_gap_pct = (trigger_low_mu - lo_rating.mu) / (trigger_low_mu - ranking_algo.GAP_SATURATION_LOW_MU)
+    gap_repeat_by_pid[hi_pid] = f"{gap_pct_val*100:.1f}% (scale: {relative_scale*100:.1f}%)"
+    gap_norepeat_by_pid[hi_pid] = f"{low_mu_gap_pct*100:.1f}% (scale: {low_mu_scale*100:.1f}%)"
+
+for place, team in placing_with_team:
+    show_gap = gm_team_any[place - 1] if gm_mask_provided else True
 
     for idx, pid in enumerate(team):
         name = names_map.get(pid) or pid
@@ -818,11 +851,11 @@ for place, team in placing_with_team:
             pre_team_str = f"{mu_pre_t:.2f} {sg_pre_t:.2f} ({rt_pre_t:.2f})"
             mu_post_t, sg_post_t, rt_post_t = post_team[place]
             post_team_base_str = f"{mu_post_t:.2f} {sg_post_t:.2f} ({rt_post_t:.2f})"
-            mu_gap_str = f"{gap_pct_val*100:.1f}% (scale: {scale_val*100:.1f}%)" if show_gap and gap_pct_val is not None else ""
         else:
             pre_team_str = ""
             post_team_base_str = ""
-            mu_gap_str = ""
+        mu_gap_repeat_str = gap_repeat_by_pid.get(pid, "") if show_gap else ""
+        mu_gap_norepeat_str = gap_norepeat_by_pid.get(pid, "") if show_gap else ""
 
         rows_gap.append(
             [
@@ -834,7 +867,8 @@ for place, team in placing_with_team:
                 post_player_gap_str,
                 f"{delta_rating:+d}",
                 f"{delta_diff:+d}",
-                mu_gap_str,
+                mu_gap_repeat_str,
+                mu_gap_norepeat_str,
             ]
         )
 
@@ -1199,7 +1233,7 @@ for pid in sorted(before_ratings.keys()):
 gap_curve_xs = list(range(101))
 gap_curve_mu_high_reference = 40.0
 gap_curve_ys = [
-    _teammate_penalty_scale(x / 100.0) * 100.0
+    _teammate_penalty_scale_gap_pct(x / 100.0) * 100.0
     for x in gap_curve_xs
 ]
 
@@ -1212,6 +1246,7 @@ report_payload = {
         "mu_rmse": mu_rmse,
         "sigma_rmse": s_rmse,
         "median_team_mu": median_team_mu_value,
+        "recent_teammate_repeat_context": recent_teammate_repeat_by_pid is not None,
         "unbalanced_pair_ratio_alpha": ub_alpha_current,
     },
     "teams_placings": teams_placings_rows,

@@ -216,7 +216,7 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
         if recent_teammate_repeat_by_pid is None or hi_pid is None or recent_teammate_repeat_by_pid.get(hi_pid, False):
             scale = _teammate_penalty_scale_gap_pct(gap_pct)
         else:
-            scale = _teammate_penalty_scale(mu_hi, mu_lo)
+            scale = max(_teammate_penalty_scale_gap_pct(gap_pct), _teammate_penalty_scale(mu_hi, mu_lo))
         if hi_pid is not None and gap_pct_by_pid is not None:
             gap_pct_by_pid[hi_pid] = gap_pct
         if hi_pid is not None and gap_scale_by_pid is not None:
