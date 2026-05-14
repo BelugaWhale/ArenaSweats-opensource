@@ -17,10 +17,11 @@ GAP_SATURATION_LOW_MU = 20.0
 # Unbalanced lobby configuration.
 # A team is considered "unbalanced" if its mu sum is above the lobby's
 # median team mu (any positive gap). The check is only performed for teams
-# where both players are GM+. For such teams we temporarily reduce their mu by
-# UNBALANCED_TEAM_MU_REDUCTION times the fractional gap before calling model.rate.
-# The fractional gap is additionally scaled by (mu_low / mu_high) ** UNBALANCED_PAIR_RATIO_ALPHA
-# so larger teammate gaps receive less grace.
+# that meet the format-specific GM+ threshold. For such teams we temporarily
+# reduce their mu by UNBALANCED_TEAM_MU_REDUCTION times the fractional gap
+# before calling model.rate. The fractional gap is additionally scaled by
+# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA so internally
+# lopsided teams receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
@@ -34,8 +35,8 @@ Each player is represented by:
 
 This module applies production rating updates in three stages:
 1) Base OpenSkill rate() update on all teams.
-2) Optional unbalanced-lobby grace for teams where both players are GM+.
-3) Team-gap modifier for the higher-mu player in GM-scoped teams.
+2) Optional unbalanced-lobby grace for teams that meet the GM+ threshold.
+3) Team-gap modifier for high-mu players in GM-scoped teams.
 
 REFERENCES:
 - https://openskill.me/
@@ -168,8 +169,8 @@ def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
 
 def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None, recent_teammate_repeat_by_pid=None):
     """
-    Apply the team-gap modifier by scaling the higher-mu player's update in
-    teams with large teammate mu gaps.
+    Apply the team-gap modifier by scaling high-mu players' updates in teams
+    with large teammate mu gaps.
 
     If gm_team_any is provided, modifier is only evaluated for teams where at
     least one teammate is GM+.
@@ -185,65 +186,48 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
         if gm_team_any is not None and not gm_team_any[i]:
             continue
 
-        old_p1, old_p2 = teams[i]
-        new_p1, new_p2 = new_teams[i]
+        if len(teams[i]) < 2:
+            raise RuntimeError("Team-gap modifier requires at least 2 players per team.")
 
-        # Identify higher and lower pre-game mu
-        if old_p1.mu >= old_p2.mu:
-            hi_old, lo_old = old_p1, old_p2
-            hi_new, lo_new = new_p1, new_p2
-            hi_index = 0
-        else:
-            hi_old, lo_old = old_p2, old_p1
-            hi_new, lo_new = new_p2, new_p1
-            hi_index = 1
+        for player_index in range(len(teams[i])):
+            hi_old = teams[i][player_index]
+            hi_new = new_teams[i][player_index]
+            teammate_mu_avg = sum(teams[i][j].mu for j in range(len(teams[i])) if j != player_index) / (len(teams[i]) - 1)
 
-        mu_hi = hi_old.mu
-        mu_lo = lo_old.mu
-        if mu_hi <= 0.0:
-            continue
+            mu_hi = hi_old.mu
+            if mu_hi <= 0.0 or teammate_mu_avg >= mu_hi:
+                continue
 
-        # Relative mu gap (scale-free), tracked for modifiers output.
-        gap_pct = 1.0 - (mu_lo / mu_hi)
-        if gap_pct <= 0.0:
-            continue
+            gap_pct = min(1.0, 1.0 - (teammate_mu_avg / mu_hi))
+            if gap_pct <= 0.0:
+                continue
 
-        gap_pct = min(gap_pct, 1.0)
-        hi_pid = None
-        if team_player_ids is not None:
-            ids = team_player_ids[i]
-            hi_pid = ids[0] if hi_index == 0 else ids[1]
-        if recent_teammate_repeat_by_pid is None or hi_pid is None or recent_teammate_repeat_by_pid.get(hi_pid, False):
-            scale = _teammate_penalty_scale_gap_pct(gap_pct)
-        else:
-            scale = max(_teammate_penalty_scale_gap_pct(gap_pct), _teammate_penalty_scale(mu_hi, mu_lo))
-        if hi_pid is not None and gap_pct_by_pid is not None:
-            gap_pct_by_pid[hi_pid] = gap_pct
-        if hi_pid is not None and gap_scale_by_pid is not None:
-            gap_scale_by_pid[hi_pid] = scale
+            hi_pid = None
+            if team_player_ids is not None:
+                hi_pid = team_player_ids[i][player_index]
+            if recent_teammate_repeat_by_pid is None or hi_pid is None or recent_teammate_repeat_by_pid.get(hi_pid, False):
+                scale = _teammate_penalty_scale_gap_pct(gap_pct)
+            else:
+                scale = max(_teammate_penalty_scale_gap_pct(gap_pct), _teammate_penalty_scale(mu_hi, teammate_mu_avg))
+            if hi_pid is not None and gap_pct_by_pid is not None:
+                gap_pct_by_pid[hi_pid] = gap_pct
+            if hi_pid is not None and gap_scale_by_pid is not None:
+                gap_scale_by_pid[hi_pid] = scale
 
-        # Apply to mu delta and to sigma's posterior-vs-prior movement only.
-        delta_mu = hi_new.mu - hi_old.mu
-        sigma_prior = math.sqrt(hi_old.sigma * hi_old.sigma + tau * tau)
-        sigma_delta_from_prior = hi_new.sigma - sigma_prior
+            delta_mu = hi_new.mu - hi_old.mu
+            sigma_prior = math.sqrt(hi_old.sigma * hi_old.sigma + tau * tau)
+            sigma_delta_from_prior = hi_new.sigma - sigma_prior
 
-        adj_mu = hi_old.mu + delta_mu * scale
-        adj_sigma = sigma_prior + sigma_delta_from_prior * scale
-
-        hi_final = model.rating(mu=adj_mu, sigma=adj_sigma)
-        lo_final = lo_new  # unchanged
-
-        # Reassign into new_teams preserving original positional mapping
-        if hi_index == 0:
-            new_teams[i] = [hi_final, lo_final]
-        else:
-            new_teams[i] = [lo_final, hi_final]
+            new_teams[i][player_index] = model.rating(
+                mu=hi_old.mu + delta_mu * scale,
+                sigma=sigma_prior + sigma_delta_from_prior * scale
+            )
 
 # ----------------------------------------------------------------------
 # UNBALANCED LOBBY helpers
 # ----------------------------------------------------------------------
 
-def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
+def check_for_unbalanced_lobby(model, teams, logger, gm_team_eligible_mask=None):
     """
     Decide whether any team is in an "unbalanced lobby" and, if so, prepare
     the adjusted teams list to feed into model.rate.
@@ -252,9 +236,9 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         model: OpenSkill model instance.
         teams: List of teams, where each team is a list of Rating objects.
         logger: Logger or None.
-        gm_team_both_mask: Optional list[bool] indicating whether both teammates
-            are GM+ for each team (same ordering as teams). If provided, only
-            teams with True are eligible for the grace.
+        gm_team_eligible_mask: Optional list[bool] indicating whether each team
+            meets the format-specific GM+ threshold. If provided, only teams
+            with True are eligible for the grace.
 
     Returns:
         teams_for_rate: None if no adjustments are required; otherwise a new
@@ -289,14 +273,13 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
 
     if lobby_median_team_mu > 0.0:
         for idx, mu_sum in enumerate(team_mu_sums):
-            # Only consider teams where both players are GM (if mask provided)
-            if gm_team_both_mask is not None and not gm_team_both_mask[idx]:
+            if gm_team_eligible_mask is not None and not gm_team_eligible_mask[idx]:
                 continue
 
             base_gap_pct = (mu_sum - lobby_median_team_mu) / lobby_median_team_mu
             if base_gap_pct > 0.0:
-                pair_scale = _unbalanced_pair_ratio_scale(teams[idx])
-                diff_pct = base_gap_pct * pair_scale
+                team_scale = _unbalanced_team_ratio_scale(teams[idx])
+                diff_pct = base_gap_pct * team_scale
                 if diff_pct > 0.0:
                     effective_gap_by_team[idx] = diff_pct
                     unbalanced_mask[idx] = True
@@ -304,12 +287,12 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
                     if logger is not None:
                         logger.debug(
                             "Unbalanced lobby detected for team index %d: "
-                            "mu_sum=%.3f lobby_median=%.3f base_gap_pct=%.3f pair_scale=%.3f effective_gap_pct=%.3f",
-                            idx, mu_sum, lobby_median_team_mu, base_gap_pct, pair_scale, diff_pct
+                            "mu_sum=%.3f lobby_median=%.3f base_gap_pct=%.3f team_scale=%.3f effective_gap_pct=%.3f",
+                            idx, mu_sum, lobby_median_team_mu, base_gap_pct, team_scale, diff_pct
                         )
     else:
         # Log when median is invalid, especially if GM+ teams are present
-        if logger is not None and gm_team_both_mask is not None and any(gm_team_both_mask):
+        if logger is not None and gm_team_eligible_mask is not None and any(gm_team_eligible_mask):
             logger.warning(
                 f"Unbalanced lobby check skipped: lobby_median_team_mu={lobby_median_team_mu} "
                 f"(team_mu_sums={team_mu_sums})"
@@ -326,7 +309,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
         if unbalanced_mask[idx]:
             adjusted_team = []
             for r in team_ratings:
-                # Reduction is scaled by team-vs-lobby gap and teammate pair-ratio.
+                # Reduction is scaled by team-vs-lobby gap and internal team balance.
                 reduction_pct = effective_gap_by_team[idx] * UNBALANCED_TEAM_MU_REDUCTION
                 reductions[idx] = reduction_pct
                 adjusted_mu = r.mu * (1.0 - reduction_pct)
@@ -340,24 +323,23 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_both_mask=None):
 
     return teams_for_rate, reductions
 
-def _unbalanced_pair_ratio_scale(team_ratings, alpha=None):
-    """Scale unbalanced-lobby grace down for lopsided teams using mu_low/mu_high."""
+def _unbalanced_team_ratio_scale(team_ratings, alpha=None):
+    """Scale unbalanced-lobby grace down for internally lopsided teams."""
     current_alpha = UNBALANCED_PAIR_RATIO_ALPHA if alpha is None else alpha
     if current_alpha <= 0.0:
         return 1.0
 
-    r0, r1 = team_ratings
-    mu_hi = r0.mu if r0.mu >= r1.mu else r1.mu
-    mu_lo = r1.mu if r0.mu >= r1.mu else r0.mu
+    mus = [r.mu for r in team_ratings]
+    mu_hi = max(mus)
+    mu_lo = min(mus)
     if mu_hi <= 0.0 or mu_lo < 0.0:
         raise ValueError(
-            f"Invalid mu values for unbalanced pair-ratio scaling: mu_hi={mu_hi}, mu_lo={mu_lo}"
+            f"Invalid mu values for unbalanced team-ratio scaling: mu_hi={mu_hi}, mu_lo={mu_lo}"
         )
     if mu_lo == 0.0:
         return 0.0
 
-    pair_ratio = mu_lo / mu_hi
-    return pair_ratio ** current_alpha
+    return (mu_lo / mu_hi) ** current_alpha
 
 # ----------------------------------------------------------------------
 # Main game-processing function
@@ -370,12 +352,12 @@ def process_game_ratings(
     player_ratings,
     logger,
     gm_set,
+    arena_format=None,
     afk_protected_pids=None,
     recent_teammate_repeat_by_pid=None,
 ):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
-    Assumes exactly 8 teams of 2 players each (16 players total).
 
     Args:
         model: ThurstoneMostellerFull model instance
@@ -401,32 +383,47 @@ def process_game_ratings(
           Positive means received protection; negative means paid donor debt.
     """
     
-    # Verify exactly 16 players
-    if len(players) != 16:
-        logger.warning(f"Game {game_id} has {len(players)} players, expected 16")
+    if arena_format is None:
+        arena_format = {
+            "name": "2x8",
+            "team_count": 8,
+            "team_size": 2,
+            "player_count": 16,
+            "placement_count": 8,
+            "tophalf_cutoff": 4,
+        }
+
+    expected_player_count = int(arena_format["player_count"])
+    expected_team_count = int(arena_format["team_count"])
+    expected_team_size = int(arena_format["team_size"])
+    placement_count = int(arena_format["placement_count"])
+    tophalf_cutoff = int(arena_format["tophalf_cutoff"])
+
+    if len(players) != expected_player_count:
+        logger.warning(f"Game {game_id} has {len(players)} players, expected {expected_player_count}")
         return False, player_ratings, {}
 
-    # Group players by team_placing (1-8)
+    # Group players by team placement.
     teams_by_placing = defaultdict(list)
     for player_id, team_placing in players:
         teams_by_placing[team_placing].append(player_id)
 
-    # Verify exactly 8 teams of 2 players each
-    if len(teams_by_placing) != 8:
-        logger.warning(f"Game {game_id} has {len(teams_by_placing)} teams, expected 8")
+    if len(teams_by_placing) != expected_team_count:
+        logger.warning(f"Game {game_id} has {len(teams_by_placing)} teams, expected {expected_team_count}")
         return False, player_ratings, {}
 
     for placing, team_players in teams_by_placing.items():
-        if len(team_players) != 2:
-            logger.warning(f"Game {game_id} team placing {placing} has {len(team_players)} players, expected 2")
+        if len(team_players) != expected_team_size:
+            logger.warning(f"Game {game_id} team placing {placing} has {len(team_players)} players, expected {expected_team_size}")
             return False, player_ratings, {}
 
-    # Prepare teams in order of placing 1 (best) to 8 (worst)
+    # Prepare teams in order of placing 1 (best) to N (worst)
     teams = []
     gm_team_any = []
-    gm_team_both = []
+    gm_team_unbalanced_eligible = []
+    gm_team_counts = []
     team_player_ids = []
-    for placing in sorted(teams_by_placing.keys()):  # 1 to 8
+    for placing in sorted(teams_by_placing.keys()):
         team_players = teams_by_placing[placing]
         team_ratings = [player_ratings.get(pid, model.rating()) for pid in team_players]
         teams.append(team_ratings)
@@ -434,10 +431,12 @@ def process_game_ratings(
         if gm_set is not None:
             gm_count = sum(1 for pid in team_players if pid in gm_set)
             gm_team_any.append(gm_count >= 1)
-            gm_team_both.append(gm_count == 2)
+            gm_team_unbalanced_eligible.append(gm_count >= min(2, expected_team_size))
+            gm_team_counts.append(gm_count)
         else:
             gm_team_any.append(False)
-            gm_team_both.append(False)
+            gm_team_unbalanced_eligible.append(False)
+            gm_team_counts.append(0)
 
     ranks = list(range(len(teams)))
 
@@ -448,7 +447,7 @@ def process_game_ratings(
                 model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
             ])
 
-        adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_both_mask=gm_team_both)
+        adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_eligible_mask=gm_team_unbalanced_eligible)
         if adjusted_teams is None:
             rate_input_final = rate_input
             unbalanced_reductions = [0.0] * len(teams)
@@ -495,10 +494,9 @@ def process_game_ratings(
         if afk_protected_pids:
             for i in range(len(teams)):
                 team_players = team_player_ids[i]
-                if team_players[0] in afk_protected_pids:
-                    new_teams[i][0] = teams[i][0]
-                if team_players[1] in afk_protected_pids:
-                    new_teams[i][1] = teams[i][1]
+                for team_player_index, pid in enumerate(team_players):
+                    if pid in afk_protected_pids:
+                        new_teams[i][team_player_index] = teams[i][team_player_index]
 
         sorted_placings = sorted(teams_by_placing.keys())
         protection_net_by_pid = {}
@@ -508,10 +506,16 @@ def process_game_ratings(
 
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
-            team_is_double_gm = gm_team_both[i]
+            gm_count = gm_team_counts[i]
+            if expected_team_size == 2:
+                team_protection_disabled = gm_count == 2
+                team_protection_cap = None
+            else:
+                team_protection_disabled = gm_count >= 2
+                team_protection_cap = 2 if gm_count == 1 else tophalf_cutoff
             for team_player_index, pid in enumerate(team_players):
                 protection_net_by_pid[pid] = 0
-                if team_is_double_gm:
+                if team_protection_disabled:
                     continue
                 if afk_protected_pids and pid in afk_protected_pids:
                     continue
@@ -524,7 +528,7 @@ def process_game_ratings(
                 base_delta_sigma = post_rating.sigma - pre_rating.sigma
 
                 is_gm = pid in gm_set if gm_set is not None else False
-                protection_cap = 3 if is_gm else 4
+                protection_cap = (3 if is_gm else 4) if expected_team_size == 2 else team_protection_cap
 
                 if placing <= protection_cap and base_delta < 0:
                     new_teams[i][team_player_index] = pre_rating
@@ -533,8 +537,8 @@ def process_game_ratings(
                     protection_net_by_pid[pid] += -base_delta
                     continue
 
-                if placing >= 5 and placing <= 8:
-                    donor_weight = float(placing - 4)
+                if placing >= tophalf_cutoff + 1 and placing <= placement_count:
+                    donor_weight = float(placing - tophalf_cutoff)
                     donor_entries.append((i, team_player_index, pid, donor_weight))
 
         if abs(debt_mu) > 1e-12 or abs(debt_sigma) > 1e-12:
@@ -542,7 +546,7 @@ def process_game_ratings(
             if weight_total <= 0.0:
                 raise RuntimeError(
                     f"Game {game_id}: place-protection debt exists (mu={debt_mu}, sigma={debt_sigma}) "
-                    f"but no eligible 5th-8th donors"
+                    f"but no eligible donor placements {tophalf_cutoff + 1}-{placement_count}"
                 )
 
             for i, team_player_index, pid, donor_weight in donor_entries:
@@ -567,9 +571,8 @@ def process_game_ratings(
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
             new_team = new_teams[i]
-            player_ratings[team_players[0]] = new_team[0]
-            player_ratings[team_players[1]] = new_team[1]
-            for pid in team_players:
+            for team_player_index, pid in enumerate(team_players):
+                player_ratings[pid] = new_team[team_player_index]
                 modifiers[pid] = {
                     "gap_pct": gap_pct_by_pid.get(pid, 0.0),
                     "gap_scale": gap_scale_by_pid.get(pid, 1.0),
