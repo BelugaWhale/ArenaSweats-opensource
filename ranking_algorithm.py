@@ -353,6 +353,7 @@ def process_game_ratings(
     logger,
     gm_set,
     arena_format=None,
+    afk_pids=None,
     afk_protected_pids=None,
     recent_teammate_repeat_by_pid=None,
 ):
@@ -366,7 +367,10 @@ def process_game_ratings(
         player_ratings: Dictionary of player_id -> Rating
         logger: Logger instance
         gm_set: Set of player_ids considered GM+ for this game's processing
+        afk_pids: Optional set of player_ids identified as AFK for this game. Final
+            positive display-rating gains are clamped back to zero for these players.
         afk_protected_pids: Optional set of player_ids whose mu/sigma changes should be zeroed
+            only when their final display-rating delta would otherwise be negative.
         recent_teammate_repeat_by_pid: Optional dict[player_id, bool].
             The teammate-gap modifier only scales the higher-mu player's delta, so the
             curve choice is keyed off that specific player's recent-teammate history.
@@ -381,6 +385,8 @@ def process_game_ratings(
         - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
         - protection_net: Net points from placement protection/debt redistribution.
           Positive means received protection; negative means paid donor debt.
+        - afk_protection_applied: 1 if an AFK-protected teammate was floored to +0, else 0.
+        - afk_penalty_applied: 1 if an AFK player's positive gain was floored to +0, else 0.
     """
     
     if arena_format is None:
@@ -491,15 +497,10 @@ def process_game_ratings(
             recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
         )
 
-        if afk_protected_pids:
-            for i in range(len(teams)):
-                team_players = team_player_ids[i]
-                for team_player_index, pid in enumerate(team_players):
-                    if pid in afk_protected_pids:
-                        new_teams[i][team_player_index] = teams[i][team_player_index]
-
         sorted_placings = sorted(teams_by_placing.keys())
         protection_net_by_pid = {}
+        afk_protection_applied_by_pid = {}
+        afk_penalty_applied_by_pid = {}
         donor_entries = []
         debt_mu = 0.0
         debt_sigma = 0.0
@@ -515,6 +516,8 @@ def process_game_ratings(
                 team_protection_cap = 2 if gm_count == 1 else tophalf_cutoff
             for team_player_index, pid in enumerate(team_players):
                 protection_net_by_pid[pid] = 0
+                afk_protection_applied_by_pid[pid] = 0
+                afk_penalty_applied_by_pid[pid] = 0
                 if team_protection_disabled:
                     continue
                 if afk_protected_pids and pid in afk_protected_pids:
@@ -565,6 +568,21 @@ def process_game_ratings(
                 donor_display_after = int(calculate_rating(donor_rating_after))
                 protection_net_by_pid[pid] -= donor_display_before - donor_display_after
 
+        if afk_pids or afk_protected_pids:
+            for i in range(len(teams)):
+                team_players = team_player_ids[i]
+                for team_player_index, pid in enumerate(team_players):
+                    pre_rating = teams[i][team_player_index]
+                    post_rating = new_teams[i][team_player_index]
+                    final_display_delta = int(round(calculate_rating(post_rating) - calculate_rating(pre_rating)))
+                    if afk_protected_pids and pid in afk_protected_pids and final_display_delta < 0:
+                        new_teams[i][team_player_index] = pre_rating
+                        afk_protection_applied_by_pid[pid] = 1
+                        continue
+                    if afk_pids and pid in afk_pids and final_display_delta > 0:
+                        new_teams[i][team_player_index] = pre_rating
+                        afk_penalty_applied_by_pid[pid] = 1
+
         modifiers = {}
         # Index i corresponds to team position in teams/new_teams/unbalanced_reductions
         # because all three were built by iterating sorted(teams_by_placing.keys()).
@@ -578,6 +596,8 @@ def process_game_ratings(
                     "gap_scale": gap_scale_by_pid.get(pid, 1.0),
                     "unbalanced_reduction_pct": unbalanced_reductions[i],
                     "protection_net": protection_net_by_pid.get(pid, 0),
+                    "afk_protection_applied": afk_protection_applied_by_pid.get(pid, 0),
+                    "afk_penalty_applied": afk_penalty_applied_by_pid.get(pid, 0),
                 }
 
         return True, player_ratings, modifiers
