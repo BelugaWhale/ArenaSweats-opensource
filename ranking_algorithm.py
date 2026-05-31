@@ -20,8 +20,9 @@ GAP_SATURATION_LOW_MU = 20.0
 # that meet the format-specific GM+ threshold. For such teams we temporarily
 # reduce their mu by UNBALANCED_TEAM_MU_REDUCTION times the fractional gap
 # before calling model.rate. The fractional gap is additionally scaled by
-# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA so internally
-# lopsided teams receive less grace.
+# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in 2v2, or
+# (avg_other_two_mu / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in 3v3,
+# so internally lopsided teams receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
@@ -339,6 +340,10 @@ def _unbalanced_team_ratio_scale(team_ratings, alpha=None):
     if mu_lo == 0.0:
         return 0.0
 
+    if len(mus) == 3:
+        mu_other_avg = (sum(mus) - mu_hi) / 2.0
+        return (mu_other_avg / mu_hi) ** current_alpha
+
     return (mu_lo / mu_hi) ** current_alpha
 
 # ----------------------------------------------------------------------
@@ -374,7 +379,8 @@ def process_game_ratings(
         recent_teammate_repeat_by_pid: Optional dict[player_id, bool].
             The teammate-gap modifier only scales the higher-mu player's delta, so the
             curve choice is keyed off that specific player's recent-teammate history.
-            True uses the existing gap_pct curve. False uses the low-mu trigger curve.
+            True uses the existing gap_pct curve. False uses the more forgiving
+            low-mu trigger curve.
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)

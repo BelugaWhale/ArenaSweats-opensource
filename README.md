@@ -65,15 +65,17 @@ There are currently 3 adjustments in place.
 
 ### Team Gap Modifier
 
-This adjustment applies in teams with at least one GM+ player. When they have a much lower-rated teammate, that game is treated as less informative for the higher-rated player. Specifically, the modifier starts when the lower teammate is below 90% of the higher teammate's μ, scales up as the gap widens, and reaches its cap once the lower teammate is at 20 μ. The result is lower gains and losses for the higher-rated player in those games.
+This adjustment applies in teams with at least one GM+ player. When a higher-rated player has much lower-rated teammates, that game is treated as less informative for that higher-rated player. In 2v2, the comparison is against the other teammate's μ. In 3v3, the comparison is against the average μ of the other two teammates.
 
-In practice, the system recognizes it could not learn as much from that result, so uncertainty reduces less than usual or can even go up. That allows future games to carry potentially larger gains or losses.
+The modifier works by scaling the higher-rated player's post-match μ change and σ change by a multiplier between 1.0 and 0.05.
+
+This scaling is more forgiving when the higher-rated player has not recently played with the same teammate or teammates.
 
 ### Unbalanced Lobby Grace
 
-This adjustment only applies when **both** teammates are GM+. If that duo enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top duos.
+This adjustment only applies to teams with 2 or more GM+ players. If such a team enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top teams.
 
-The grace is reduced for GM+ duos that have a big skill gap between them, and gets stronger for similarly-rated GM+ duos.
+The grace is reduced for GM+ teams with greater μ spread and gets stronger for more similarly-rated GM+ teams. In 2v2 this internal balance check uses the lower player's μ relative to the higher player's μ. In 3v3 it uses the average μ of the other two players relative to the highest player's μ.
 
 ### Protection
 
