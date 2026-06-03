@@ -2,6 +2,8 @@ import math
 from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
 
+IS_3X6 = True
+
 # Global configuration for the team-gap modifier (historically named "penalty").
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
 #                         higher player's mu/sigma delta once fully reduced.
@@ -113,7 +115,7 @@ def instantiate_rating_model():
     - https://openskill.me/en/stable/models/openskill.models.weng_lin.thurstone_mosteller_full.html
     """
     # This instantiation creates a model for games with strict rankings (no draws).
-    model = ThurstoneMostellerFull(sigma=(25/5.75), beta=(25/6) * 4, tau=(25/300) * 1.75)
+    model = ThurstoneMostellerFull(sigma=(25/5.75), beta=(25/6) * (3 if IS_3X6 else 4), tau=(25/300) * 1.75)
 
     return model
 
