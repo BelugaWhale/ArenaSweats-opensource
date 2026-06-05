@@ -22,14 +22,13 @@ GAP_SATURATION_LOW_MU = 20.0
 # that meet the format-specific GM+ threshold. For such teams we temporarily
 # reduce their mu by UNBALANCED_TEAM_MU_REDUCTION times the fractional gap
 # before calling model.rate. The fractional gap is additionally scaled by
-# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in 2v2, or
-# (avg_other_two_mu / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in 3v3,
-# so internally lopsided teams receive less grace.
+# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in both 2v2 and 3v3,
+# so teams with greater mu spread receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
-UNBALANCED_TEAM_MU_REDUCTION = 0.22   # Apply 22% of the effective gap as a temporary mu reduction
-UNBALANCED_PAIR_RATIO_ALPHA = 3.0
+UNBALANCED_TEAM_MU_REDUCTION = 0.57 if IS_3X6 else 0.22   # Apply 57% of the effective gap in 3v3, or 22% in 2v2
+UNBALANCED_PAIR_RATIO_ALPHA = 2.5 if IS_3X6 else 3.0
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
 Each player is represented by:
@@ -327,7 +326,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_eligible_mask=None)
     return teams_for_rate, reductions
 
 def _unbalanced_team_ratio_scale(team_ratings, alpha=None):
-    """Scale unbalanced-lobby grace down for internally lopsided teams."""
+    """Scale unbalanced-lobby grace down for teams with greater mu spread."""
     current_alpha = UNBALANCED_PAIR_RATIO_ALPHA if alpha is None else alpha
     if current_alpha <= 0.0:
         return 1.0
@@ -341,10 +340,6 @@ def _unbalanced_team_ratio_scale(team_ratings, alpha=None):
         )
     if mu_lo == 0.0:
         return 0.0
-
-    if len(mus) == 3:
-        mu_other_avg = (sum(mus) - mu_hi) / 2.0
-        return (mu_other_avg / mu_hi) ** current_alpha
 
     return (mu_lo / mu_hi) ** current_alpha
 

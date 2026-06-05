@@ -27,7 +27,7 @@ This repository's purpose is to bring these principles to life, being the real l
 ArenaSweats uses **OpenSkill TM**, an industry-leading, battle-tested Bayesian ranking system. Unlike simple win/loss systems, OpenSkill TM is smart about understanding your true skill level.
 
 **Parameters**: Based on player feedback and simulation validation, we currently use:
-`return ThurstoneMostellerFull(sigma=(25/5.75), beta=(25/6) * 4, tau=(25/300) * 1.75)`
+`return ThurstoneMostellerFull(sigma=(25/5.75), beta=(25/6) * (3.75 in 3v3, 4 in 2v2), tau=(25/300) * 1.75)`
 
 ### 📈 Your Skill Profile: Two Numbers That Matter
 
@@ -75,7 +75,7 @@ This scaling is more forgiving when the higher-rated player has not recently pla
 
 This adjustment only applies to teams with 2 or more GM+ players. If such a team enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top teams.
 
-The grace is reduced for GM+ teams with greater μ spread and gets stronger for more similarly-rated GM+ teams. In 2v2 this internal balance check uses the lower player's μ relative to the higher player's μ. In 3v3 it uses the average μ of the other two players relative to the highest player's μ.
+The temporary reduction uses 22% of the effective gap in 2v2 and 57% in 3v3. The grace is reduced for GM+ teams with greater μ spread and gets stronger for more similarly-rated GM+ teams. In both 2v2 and 3v3 this internal balance check uses the lower player's μ relative to the higher player's μ, with an exponent of 3 in 2v2 and 2.5 in 3v3.
 
 ### Protection
 
