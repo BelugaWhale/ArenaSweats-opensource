@@ -20,15 +20,19 @@ GAP_SATURATION_LOW_MU = 20.0
 # A team is considered "unbalanced" if its mu sum is above the lobby's
 # median team mu (any positive gap). The check is only performed for teams
 # that meet the format-specific GM+ threshold. For such teams we temporarily
-# reduce their mu by UNBALANCED_TEAM_MU_REDUCTION times the fractional gap
-# before calling model.rate. The fractional gap is additionally scaled by
-# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in both 2v2 and 3v3,
-# so teams with greater mu spread receive less grace.
+# reduce their mu before calling model.rate. In 2v2 the temporary reduction is
+# linear in the effective gap. In 3v3 the same linear baseline is tapered by a
+# smooth asymptotic curve so extreme gaps do not keep scaling upward as quickly.
+# The fractional gap is additionally scaled by (team_mu_min / team_mu_max) **
+# UNBALANCED_PAIR_RATIO_ALPHA in both 2v2 and 3v3, so teams with greater mu
+# spread receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_TEAM_MU_REDUCTION = 0.57 if IS_3X6 else 0.22   # Apply 57% of the effective gap in 3v3, or 22% in 2v2
 UNBALANCED_PAIR_RATIO_ALPHA = 2.5 if IS_3X6 else 3.0
+UNBALANCED_GRACE_ASYMPTOTE_Y = 0.20
+UNBALANCED_GRACE_CURVE_SCALE = 0.95
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
 Each player is represented by:
@@ -312,7 +316,7 @@ def check_for_unbalanced_lobby(model, teams, logger, gm_team_eligible_mask=None)
             adjusted_team = []
             for r in team_ratings:
                 # Reduction is scaled by team-vs-lobby gap and internal team balance.
-                reduction_pct = effective_gap_by_team[idx] * UNBALANCED_TEAM_MU_REDUCTION
+                reduction_pct = _unbalanced_grace_reduction_pct(effective_gap_by_team[idx])
                 reductions[idx] = reduction_pct
                 adjusted_mu = r.mu * (1.0 - reduction_pct)
                 adjusted_team.append(model.rating(mu=adjusted_mu, sigma=r.sigma))
@@ -342,6 +346,17 @@ def _unbalanced_team_ratio_scale(team_ratings, alpha=None):
         return 0.0
 
     return (mu_lo / mu_hi) ** current_alpha
+
+def _unbalanced_grace_reduction_pct(effective_gap_pct: float) -> float:
+    """Convert effective unbalanced-lobby gap into the temporary reduction pct."""
+    if IS_3X6:
+        if UNBALANCED_GRACE_ASYMPTOTE_Y <= 0.0:
+            raise ValueError("UNBALANCED_GRACE_ASYMPTOTE_Y must be > 0.")
+        if UNBALANCED_GRACE_CURVE_SCALE <= 0.0 or UNBALANCED_GRACE_CURVE_SCALE > 1.0:
+            raise ValueError("UNBALANCED_GRACE_CURVE_SCALE must be in (0, 1].")
+        linear_scaled_gap = (UNBALANCED_TEAM_MU_REDUCTION / UNBALANCED_GRACE_ASYMPTOTE_Y) * effective_gap_pct
+        return UNBALANCED_GRACE_ASYMPTOTE_Y * math.tanh(linear_scaled_gap * UNBALANCED_GRACE_CURVE_SCALE)
+    return effective_gap_pct * UNBALANCED_TEAM_MU_REDUCTION
 
 # ----------------------------------------------------------------------
 # Main game-processing function
