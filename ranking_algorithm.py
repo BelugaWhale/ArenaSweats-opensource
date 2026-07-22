@@ -3,6 +3,7 @@ from collections import defaultdict
 from openskill.models import ThurstoneMostellerFull
 
 IS_3X6 = True
+SIGMA_FLOOR = 2.5
 
 # Global configuration for the team-gap modifier (historically named "penalty").
 # PENALTY_MIN_MULTIPLIER: lower bound on the multiplier applied to the
@@ -20,19 +21,19 @@ GAP_SATURATION_LOW_MU = 20.0
 # A team is considered "unbalanced" if its mu sum is above the lobby's
 # median team mu (any positive gap). The check is only performed for teams
 # that meet the format-specific GM+ threshold. For such teams we temporarily
-# reduce their mu before calling model.rate. In 2v2 the temporary reduction is
-# linear in the effective gap. In 3v3 the same linear baseline is tapered by a
-# smooth asymptotic curve so extreme gaps do not keep scaling upward as quickly.
-# The fractional gap is additionally scaled by (team_mu_min / team_mu_max) **
-# UNBALANCED_PAIR_RATIO_ALPHA in both 2v2 and 3v3, so teams with greater mu
-# spread receive less grace.
+# reduce their mu based on the fractional gap before calling model.rate. In
+# 3v3, the first 20% uses the 57% slope and any excess uses a 25% slope. The
+# fractional gap is additionally scaled by
+# (team_mu_min / team_mu_max) ** UNBALANCED_PAIR_RATIO_ALPHA in both 2v2 and 3v3,
+# so teams with greater mu spread receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_TEAM_MU_REDUCTION = 0.57 if IS_3X6 else 0.22   # Apply 57% of the effective gap in 3v3, or 22% in 2v2
+UNBALANCED_3V3_GRACE_BREAKPOINT = 0.20
+UNBALANCED_3V3_GRACE_TAIL_SLOPE = 0.25
 UNBALANCED_PAIR_RATIO_ALPHA = 2.5 if IS_3X6 else 3.0
-UNBALANCED_GRACE_ASYMPTOTE_Y = 0.20
-UNBALANCED_GRACE_CURVE_SCALE = 0.95
+UNBALANCED_GRACE_REPEATED_TEAMMATE_SCALE_MAX = 0.75
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
 Each player is represented by:
@@ -173,13 +174,51 @@ def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
     # Clamp to safety range
     return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
 
-def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None, team_player_ids=None, gap_pct_by_pid=None, gap_scale_by_pid=None, recent_teammate_repeat_by_pid=None):
-    """
-    Apply the team-gap modifier by scaling high-mu players' updates in teams
-    with large teammate mu gaps.
+def calculate_teammate_gap_modifiers(teams, gm_team_any, team_player_ids, repeated_teammate_ids_by_pid):
+    """Calculate each player's worst individual teammate-gap modifier."""
+    gap_pct_by_pid = {}
+    gap_scale_by_pid = {}
+    unbalanced_grace_blocked_by_team = [False] * len(teams)
 
-    If gm_team_any is provided, modifier is only evaluated for teams where at
-    least one teammate is GM+.
+    for team_index, team in enumerate(teams):
+        if not gm_team_any[team_index]:
+            continue
+        if len(team) < 2:
+            raise RuntimeError("Team-gap modifier requires at least 2 players per team.")
+
+        for player_index, player_rating in enumerate(team):
+            player_id = team_player_ids[team_index][player_index]
+            if player_rating.mu <= 0.0:
+                continue
+            repeated_teammates = None if repeated_teammate_ids_by_pid is None else repeated_teammate_ids_by_pid[player_id]
+            player_gap_pct = 0.0
+            player_gap_scale = 1.0
+
+            for teammate_index, teammate_rating in enumerate(team):
+                if teammate_index == player_index or teammate_rating.mu >= player_rating.mu:
+                    continue
+                teammate_id = team_player_ids[team_index][teammate_index]
+                gap_pct = min(1.0, 1.0 - (teammate_rating.mu / player_rating.mu))
+                repeated = repeated_teammates is None or teammate_id in repeated_teammates
+                scale = _teammate_penalty_scale_gap_pct(gap_pct) if repeated else max(
+                    _teammate_penalty_scale_gap_pct(gap_pct),
+                    _teammate_penalty_scale(player_rating.mu, teammate_rating.mu),
+                )
+                if scale < player_gap_scale or (scale == player_gap_scale and gap_pct > player_gap_pct):
+                    player_gap_pct = gap_pct
+                    player_gap_scale = scale
+                if repeated_teammates is not None and teammate_id in repeated_teammates and scale <= UNBALANCED_GRACE_REPEATED_TEAMMATE_SCALE_MAX:
+                    unbalanced_grace_blocked_by_team[team_index] = True
+
+            if player_gap_pct > 0.0:
+                gap_pct_by_pid[player_id] = player_gap_pct
+                gap_scale_by_pid[player_id] = player_gap_scale
+
+    return gap_pct_by_pid, gap_scale_by_pid, unbalanced_grace_blocked_by_team
+
+def apply_teammate_gap_penalty(model, teams, new_teams, team_player_ids, gap_scale_by_pid):
+    """
+    Apply precomputed team-gap modifiers to players' rating updates.
     """
     tau = getattr(model, "tau", None)
     if tau is None:
@@ -188,44 +227,20 @@ def apply_teammate_gap_penalty(model, teams, new_teams, logger, gm_team_any=None
     if tau < 0.0:
         raise ValueError(f"Invalid model.tau={tau}; expected tau >= 0.")
 
-    for i in range(len(teams)):
-        if gm_team_any is not None and not gm_team_any[i]:
-            continue
-
-        if len(teams[i]) < 2:
-            raise RuntimeError("Team-gap modifier requires at least 2 players per team.")
-
-        for player_index in range(len(teams[i])):
-            hi_old = teams[i][player_index]
-            hi_new = new_teams[i][player_index]
-            teammate_mu_avg = sum(teams[i][j].mu for j in range(len(teams[i])) if j != player_index) / (len(teams[i]) - 1)
-
-            mu_hi = hi_old.mu
-            if mu_hi <= 0.0 or teammate_mu_avg >= mu_hi:
+    for team_index, team in enumerate(teams):
+        for player_index, old_rating in enumerate(team):
+            player_id = team_player_ids[team_index][player_index]
+            scale = gap_scale_by_pid.get(player_id, 1.0)
+            if scale >= 1.0:
                 continue
+            new_rating = new_teams[team_index][player_index]
 
-            gap_pct = min(1.0, 1.0 - (teammate_mu_avg / mu_hi))
-            if gap_pct <= 0.0:
-                continue
+            delta_mu = new_rating.mu - old_rating.mu
+            sigma_prior = math.sqrt(old_rating.sigma * old_rating.sigma + tau * tau)
+            sigma_delta_from_prior = new_rating.sigma - sigma_prior
 
-            hi_pid = None
-            if team_player_ids is not None:
-                hi_pid = team_player_ids[i][player_index]
-            if recent_teammate_repeat_by_pid is None or hi_pid is None or recent_teammate_repeat_by_pid.get(hi_pid, False):
-                scale = _teammate_penalty_scale_gap_pct(gap_pct)
-            else:
-                scale = max(_teammate_penalty_scale_gap_pct(gap_pct), _teammate_penalty_scale(mu_hi, teammate_mu_avg))
-            if hi_pid is not None and gap_pct_by_pid is not None:
-                gap_pct_by_pid[hi_pid] = gap_pct
-            if hi_pid is not None and gap_scale_by_pid is not None:
-                gap_scale_by_pid[hi_pid] = scale
-
-            delta_mu = hi_new.mu - hi_old.mu
-            sigma_prior = math.sqrt(hi_old.sigma * hi_old.sigma + tau * tau)
-            sigma_delta_from_prior = hi_new.sigma - sigma_prior
-
-            new_teams[i][player_index] = model.rating(
-                mu=hi_old.mu + delta_mu * scale,
+            new_teams[team_index][player_index] = model.rating(
+                mu=old_rating.mu + delta_mu * scale,
                 sigma=sigma_prior + sigma_delta_from_prior * scale
             )
 
@@ -349,14 +364,9 @@ def _unbalanced_team_ratio_scale(team_ratings, alpha=None):
 
 def _unbalanced_grace_reduction_pct(effective_gap_pct: float) -> float:
     """Convert effective unbalanced-lobby gap into the temporary reduction pct."""
-    if IS_3X6:
-        if UNBALANCED_GRACE_ASYMPTOTE_Y <= 0.0:
-            raise ValueError("UNBALANCED_GRACE_ASYMPTOTE_Y must be > 0.")
-        if UNBALANCED_GRACE_CURVE_SCALE <= 0.0 or UNBALANCED_GRACE_CURVE_SCALE > 1.0:
-            raise ValueError("UNBALANCED_GRACE_CURVE_SCALE must be in (0, 1].")
-        linear_scaled_gap = (UNBALANCED_TEAM_MU_REDUCTION / UNBALANCED_GRACE_ASYMPTOTE_Y) * effective_gap_pct
-        return UNBALANCED_GRACE_ASYMPTOTE_Y * math.tanh(linear_scaled_gap * UNBALANCED_GRACE_CURVE_SCALE)
-    return effective_gap_pct * UNBALANCED_TEAM_MU_REDUCTION
+    if not IS_3X6 or effective_gap_pct <= UNBALANCED_3V3_GRACE_BREAKPOINT:
+        return effective_gap_pct * UNBALANCED_TEAM_MU_REDUCTION
+    return UNBALANCED_3V3_GRACE_BREAKPOINT * UNBALANCED_TEAM_MU_REDUCTION + (effective_gap_pct - UNBALANCED_3V3_GRACE_BREAKPOINT) * UNBALANCED_3V3_GRACE_TAIL_SLOPE
 
 # ----------------------------------------------------------------------
 # Main game-processing function
@@ -372,7 +382,7 @@ def process_game_ratings(
     arena_format=None,
     afk_pids=None,
     afk_protected_pids=None,
-    recent_teammate_repeat_by_pid=None,
+    repeated_teammate_ids_by_pid=None,
 ):
     """
     Process a single game's ratings update using OpenSkill ThurstoneMostellerFull with direct team support.
@@ -388,11 +398,9 @@ def process_game_ratings(
             positive display-rating gains are clamped back to zero for these players.
         afk_protected_pids: Optional set of player_ids whose mu/sigma changes should be zeroed
             only when their final display-rating delta would otherwise be negative.
-        recent_teammate_repeat_by_pid: Optional dict[player_id, bool].
-            The teammate-gap modifier only scales the higher-mu player's delta, so the
-            curve choice is keyed off that specific player's recent-teammate history.
-            True uses the existing gap_pct curve. False uses the more forgiving
-            low-mu trigger curve.
+        repeated_teammate_ids_by_pid: Optional dict[player_id, collection[player_id]].
+            Each current teammate uses the repeated curve only when that teammate is
+            present in the player's collection. None preserves the strict legacy curve.
 
     Returns:
         tuple: (success: bool, updated_player_ratings: dict, modifiers: dict[player_id] -> dict)
@@ -462,6 +470,17 @@ def process_game_ratings(
             gm_team_unbalanced_eligible.append(False)
             gm_team_counts.append(0)
 
+    gap_pct_by_pid, gap_scale_by_pid, unbalanced_grace_blocked_by_team = calculate_teammate_gap_modifiers(
+        teams,
+        gm_team_any,
+        team_player_ids,
+        repeated_teammate_ids_by_pid,
+    )
+    gm_team_unbalanced_eligible = [
+        eligible and not unbalanced_grace_blocked_by_team[team_index]
+        for team_index, eligible in enumerate(gm_team_unbalanced_eligible)
+    ]
+
     ranks = list(range(len(teams)))
 
     try:
@@ -496,23 +515,20 @@ def process_game_ratings(
 
                 final_mu = orig.mu + delta_mu
                 final_sigma = orig.sigma + delta_sigma
+                if final_sigma <= 0.0:
+                    raise RuntimeError(f"Game {game_id}: OpenSkill produced non-positive sigma={final_sigma}")
+                final_sigma = max(final_sigma, SIGMA_FLOOR)
 
                 final_team.append(model.rating(mu=final_mu, sigma=final_sigma))
 
             new_teams.append(final_team)
 
-        gap_pct_by_pid = {}
-        gap_scale_by_pid = {}
         apply_teammate_gap_penalty(
             model,
             teams,
             new_teams,
-            logger,
-            gm_team_any=gm_team_any,
-            team_player_ids=team_player_ids,
-            gap_pct_by_pid=gap_pct_by_pid,
-            gap_scale_by_pid=gap_scale_by_pid,
-            recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
+            team_player_ids,
+            gap_scale_by_pid,
         )
 
         sorted_placings = sorted(teams_by_placing.keys())
@@ -580,6 +596,7 @@ def process_game_ratings(
                         f"Game {game_id}: donor sigma became non-positive for pid={pid} "
                         f"(sigma={donor_sigma}, debt_sigma={debt_sigma}, share={donor_share})"
                     )
+                donor_sigma = max(donor_sigma, SIGMA_FLOOR)
                 donor_rating_after = model.rating(mu=donor_mu, sigma=donor_sigma)
                 new_teams[i][team_player_index] = donor_rating_after
                 donor_display_before = int(calculate_rating(donor_rating_before))

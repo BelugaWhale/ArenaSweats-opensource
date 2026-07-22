@@ -37,6 +37,8 @@ OpenSkill TM doesn't just track one rating number - it maintains two key pieces 
 
 **Uncertainty (σ "sigma")** - This measures how confident the system is about your skill level. New players start with high uncertainty, but as you play more games, the system becomes more confident in its assessment of your ability.
 
+Sigma has a floor of 2.5. OpenSkill and subsequent ranking modifiers may increase sigma, but the stored post-game sigma never falls below this value.
+
 ### ⚙️ Applying OpenSkill TM to Arena
 
 Each Arena match has 8 teams of 2 players (16 total players). Here's what happens behind the scenes:
@@ -75,13 +77,13 @@ This scaling is more forgiving when the higher-rated player has not recently pla
 
 This adjustment only applies to teams with 2 or more GM+ players. If such a team enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top teams.
 
-The temporary reduction uses 22% of the effective gap in 2v2 and 57% in 3v3. In 2v2 this reduction is linear. In 3v3 the same baseline is tapered by a smooth asymptotic curve so very large gaps do not keep increasing grace as quickly. The grace is reduced for GM+ teams with greater μ spread and gets stronger for more similarly-rated GM+ teams. In both 2v2 and 3v3 this internal balance check uses the lower player's μ relative to the higher player's μ, with an exponent of 3 in 2v2 and 2.5 in 3v3.
+The temporary reduction uses 22% of the effective gap in 2v2. In 3v3, it uses 57% through a 20% effective gap, then continues from that point at a 25% slope. The grace is reduced for GM+ teams with greater μ spread and gets stronger for more similarly-rated GM+ teams. In both 2v2 and 3v3 this internal balance check uses the lower player's μ relative to the higher player's μ, with an exponent of 3 in 2v2 and 2.5 in 3v3.
 
 ### Protection
 
 In order to support solo queue without indirectly buffing boosting, two forms of protection are added:
 
-**AFK Protection** - If a player places 8th and has a teammate with 0 kills, 0 assists, and less than 5000 damage dealt, that player's rating update is ignored for that game.
+**AFK Protection** - If a player would lose rating and has a teammate with 0 kills, fewer than 3 assists, and less than 3000 damage dealt, that player's rating loss is ignored for that game.
 
 **Place Protection** - This applies only to teams that are not 2 Grandmaster+ players. Grandmaster+ players never lose rating if they place 3rd or above. Players below Grandmaster never lose rating if they place 4th or above.
 
