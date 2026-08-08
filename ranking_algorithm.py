@@ -33,7 +33,7 @@ UNBALANCED_TEAM_MU_REDUCTION = 0.57 if IS_3X6 else 0.22   # Apply 57% of the eff
 UNBALANCED_3V3_GRACE_BREAKPOINT = 0.20
 UNBALANCED_3V3_GRACE_TAIL_SLOPE = 0.25
 UNBALANCED_PAIR_RATIO_ALPHA = 2.5 if IS_3X6 else 3.0
-UNBALANCED_GRACE_REPEATED_TEAMMATE_SCALE_MAX = 0.75
+UNBALANCED_GRACE_REPEATED_TEAMMATE_GAP_MIN = 0.30
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
 Each player is represented by:
@@ -207,7 +207,7 @@ def calculate_teammate_gap_modifiers(teams, gm_team_any, team_player_ids, repeat
                 if scale < player_gap_scale or (scale == player_gap_scale and gap_pct > player_gap_pct):
                     player_gap_pct = gap_pct
                     player_gap_scale = scale
-                if repeated_teammates is not None and teammate_id in repeated_teammates and scale <= UNBALANCED_GRACE_REPEATED_TEAMMATE_SCALE_MAX:
+                if repeated_teammates is not None and teammate_id in repeated_teammates and gap_pct >= UNBALANCED_GRACE_REPEATED_TEAMMATE_GAP_MIN:
                     unbalanced_grace_blocked_by_team[team_index] = True
 
             if player_gap_pct > 0.0:

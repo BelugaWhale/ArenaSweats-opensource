@@ -46,18 +46,18 @@ class TeamGapTests(unittest.TestCase):
         self.assertAlmostEqual(scales["player"], _teammate_penalty_scale_gap_pct(1 - 34 / 60))
         self.assertEqual(grace_blocked, [True])
 
-    def test_grace_block_uses_repeated_teammates_own_scale(self):
-        _, _, grace_blocked = self.calculate([47, 30], {"teammate_b"})
+    def test_grace_block_uses_repeated_teammates_own_gap(self):
+        _, _, grace_blocked = self.calculate([42.01, 30], {"teammate_b"})
         self.assertEqual(grace_blocked, [False])
 
-        _, _, grace_blocked = self.calculate([46, 55], {"teammate_b"})
+        _, _, grace_blocked = self.calculate([42, 55], {"teammate_b"})
         self.assertEqual(grace_blocked, [True])
 
     def test_process_blocks_grace_for_eligible_team(self):
         player_ids = ["player", "teammate_b", "teammate_c", "opponent_a", "opponent_b", "opponent_c"]
         ratings = {
             player_id: self.model.rating(mu=mu)
-            for player_id, mu in zip(player_ids, [60, 46, 55, 25, 25, 25])
+            for player_id, mu in zip(player_ids, [60, 42, 55, 25, 25, 25])
         }
         repeated_teammates = {player_id: set() for player_id in player_ids}
         repeated_teammates["player"] = {"teammate_b"}
