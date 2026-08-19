@@ -41,11 +41,11 @@ Sigma has a floor of 2.5. OpenSkill and subsequent ranking modifiers may increas
 
 ### ⚙️ Applying OpenSkill TM to Arena
 
-Each Arena match has 8 teams of 2 players (16 total players). Here's what happens behind the scenes:
+Each Arena match currently has 6 teams of 3 players (18 total players). Here's what happens behind the scenes:
 
 1.  **Before the match**: The system looks at each player's skill level and uncertainty
-2.  **Team strength calculation**: Your duo's combined strength is calculated by adding both players' skill levels together
-3.  **Match prediction**: Based on all 8 teams' strengths, the system predicts how likely each team is to finish in each position (1st through 8th)
+2.  **Team strength calculation**: Your team's combined strength is calculated by adding the players' skill levels together
+3.  **Match prediction**: Based on all 6 teams' strengths, the system predicts how likely each team is to finish in each position (1st through 6th)
 4.  **After the match**: Rating changes depend on how your actual performance compared to what was expected
 
 ### 🎯 Rating Changes: How to Climb the Ladder
@@ -59,7 +59,7 @@ Your rating changes are based on:
 ## 🛠️ Community-Driven Adjustments
 
 
-Arena is a complicated mode (8 teams, duos, boosting pressure, bravery, matchmaking limitations) so a ranking model out of the box will not fit this perfectly, Adjustments are needed on-top to keep the leaderboard fair and accurate.
+Arena is a complicated mode (6 teams, duos/trios, boosting pressure, bravery, matchmaking limitations) so a ranking model out of the box will not fit this perfectly. Adjustments are needed on top to keep the leaderboard fair and accurate.
 
 As covered in [Principle #3](#-arenasweats-ranked-principles), ranked adjustments are community-driven and discussed on [Discord](https://discord.gg/BvGFJ4WEWg).
 
@@ -67,7 +67,7 @@ There are currently 3 adjustments in place.
 
 ### Team Gap Modifier
 
-This adjustment applies in teams with at least one GM+ player. When a higher-rated player has much lower-rated teammates, that game is treated as less informative for that higher-rated player. In 2v2, the comparison is against the other teammate's μ. In 3v3, the comparison is against the average μ of the other two teammates.
+This adjustment applies in teams with at least one GM+ player. When a higher-rated player has much lower-rated teammates, that game is treated as less informative for that higher-rated player. Each lower-rated teammate is compared separately; the largest of those gaps is the one that applies.
 
 The modifier works by scaling the higher-rated player's post-match μ change and σ change by a multiplier between 1.0 and 0.05.
 
@@ -77,7 +77,7 @@ This scaling is more forgiving when the higher-rated player has not recently pla
 
 This adjustment only applies to teams with 2 or more GM+ players. If such a team enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top teams.
 
-The temporary reduction uses 22% of the effective gap in 2v2. In 3v3, it uses 57% through a 20% effective gap, then continues from that point at a 25% slope. The grace is reduced for GM+ teams with greater μ spread and gets stronger for more similarly-rated GM+ teams. In both 2v2 and 3v3 this internal balance check uses the lower player's μ relative to the higher player's μ, with an exponent of 3 in 2v2 and 2.5 in 3v3.
+The temporary reduction uses 22% of the effective gap in 2v2. In 3v3, it uses 57% through a 20% effective gap, then continues from that point at a 25% slope. Teams with a wider rating gap between teammates get less total grace; more similarly-rated GM+ teams get more. That grace is then shared so lower-rated teammates receive more of it than higher-rated teammates. If a teammate is 20% higher in skill than the lowest-rated player on the team, the lowest-rated player receives 20% more of the grace than they do. The team's overall grace does not increase.
 
 ### Protection
 
@@ -85,9 +85,9 @@ In order to support solo queue without indirectly buffing boosting, two forms of
 
 **AFK Protection** - If a player would lose rating and has a teammate with 0 kills, fewer than 3 assists, and less than 3000 damage dealt, that player's rating loss is ignored for that game.
 
-**Place Protection** - This applies only to teams that are not 2 Grandmaster+ players. Grandmaster+ players never lose rating if they place 3rd or above. Players below Grandmaster never lose rating if they place 4th or above.
+**Place Protection** - This is disabled for any team with 2 or more Grandmaster+ players. On a team with no Grandmaster+ players, nobody loses rating if they place 3rd or above. On a team with exactly one Grandmaster+ player, nobody on that team loses rating if they place 2nd or above.
 
-Protected loss is redistributed to eligible players in 5th-8th place, weighted by placement (8th pays the most, 5th the least).
+Protected loss is redistributed to eligible players in 4th-6th place, weighted by placement (6th pays the most, 4th the least).
 
 ### 🏆 Your Final Rating
 

@@ -116,6 +116,68 @@ class TeamGapTests(unittest.TestCase):
         for player_id in player_ids:
             self.assertAlmostEqual(updated_ratings[player_id].sigma, SIGMA_FLOOR)
 
+    def test_grace_tilt_reallocates_mu_and_keeps_ordinary_sigma(self):
+        arena_format = {
+            "name": "3x6",
+            "team_count": 6,
+            "team_size": 3,
+            "player_count": 18,
+            "placement_count": 6,
+            "tophalf_cutoff": 3,
+        }
+        stacked_mus = [52.0, 50.0, 48.0]
+        player_ids = [f"p{index}" for index in range(18)]
+        players = [(player_id, index // 3 + 1) for index, player_id in enumerate(player_ids)]
+        logger = logging.getLogger("test_grace_tilt")
+
+        def make_ratings():
+            ratings = {}
+            for index, player_id in enumerate(player_ids):
+                mu = stacked_mus[index] if index < 3 else 38.0
+                ratings[player_id] = self.model.rating(mu=mu, sigma=4.0)
+            return ratings
+
+        with patch("ranking_algorithm.UNBALANCED_LOBBY_GRACE_ENABLED", False):
+            success, ordinary_ratings, ordinary_modifiers = process_game_ratings(
+                self.model,
+                players,
+                "grace-tilt-ordinary",
+                make_ratings(),
+                logger,
+                set(player_ids),
+                arena_format=arena_format,
+            )
+        self.assertTrue(success)
+
+        success, tilted_ratings, tilted_modifiers = process_game_ratings(
+            self.model,
+            players,
+            "grace-tilt-graced",
+            make_ratings(),
+            logger,
+            set(player_ids),
+            arena_format=arena_format,
+        )
+        self.assertTrue(success)
+        self.assertGreater(tilted_modifiers["p0"]["unbalanced_reduction_pct"], 0.0)
+        self.assertEqual(tilted_modifiers["p0"]["gap_scale"], 1.0)
+        self.assertEqual(tilted_modifiers["p1"]["gap_scale"], 1.0)
+        self.assertEqual(tilted_modifiers["p2"]["gap_scale"], 1.0)
+
+        allocated = []
+        for index in range(3):
+            player_id = f"p{index}"
+            self.assertAlmostEqual(tilted_ratings[player_id].sigma, ordinary_ratings[player_id].sigma)
+            allocated.append(tilted_ratings[player_id].mu - ordinary_ratings[player_id].mu)
+        self.assertGreater(min(allocated), 0.0)
+        self.assertAlmostEqual(allocated[2] / allocated[0], stacked_mus[0] / stacked_mus[2])
+        self.assertGreater(allocated[2], allocated[1])
+        self.assertGreater(allocated[1], allocated[0])
+        self.assertAlmostEqual(
+            sum(tilted_ratings[f"p{index}"].mu for index in range(3)),
+            sum(ordinary_ratings[f"p{index}"].mu for index in range(3)) + sum(allocated),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
