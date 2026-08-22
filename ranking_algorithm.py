@@ -417,8 +417,8 @@ def process_game_ratings(
         - openskill_rating_change: Displayed-rating change from the ordinary OpenSkill update.
         - unbalanced_grace_net: Displayed-rating change added by unbalanced-lobby grace before team-gap.
         - team_gap_net: Displayed-rating change added or removed by team-gap after grace.
-        - protection_net: Net points from placement protection/debt redistribution.
-          Positive means received protection; negative means paid donor debt.
+        - protection_net: Net points from placement/AFK protection, AFK penalties,
+          and protection-debt redistribution.
         - afk_protection_applied: 1 if an AFK-protected teammate was floored to +0, else 0.
         - afk_penalty_applied: 1 if an AFK player's positive gain was floored to +0, else 0.
     """
@@ -678,10 +678,12 @@ def process_game_ratings(
                     post_rating = new_teams[i][team_player_index]
                     final_display_delta = int(round(calculate_rating(post_rating) - calculate_rating(pre_rating)))
                     if afk_protected_pids and pid in afk_protected_pids and final_display_delta < 0:
+                        protection_net_by_pid[pid] -= final_display_delta
                         new_teams[i][team_player_index] = pre_rating
                         afk_protection_applied_by_pid[pid] = 1
                         continue
                     if afk_pids and pid in afk_pids and final_display_delta > 0:
+                        protection_net_by_pid[pid] -= final_display_delta
                         new_teams[i][team_player_index] = pre_rating
                         afk_penalty_applied_by_pid[pid] = 1
 

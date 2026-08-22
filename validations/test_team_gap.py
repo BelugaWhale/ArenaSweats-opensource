@@ -170,6 +170,43 @@ class TeamGapTests(unittest.TestCase):
         self.assertLess(calculate_rating(updated_ratings["p6"]), pregame_rating)
         self.assertEqual(modifiers["p6"]["protection_net"], 0)
 
+    def test_afk_adjustments_are_included_in_exact_breakdown(self):
+        player_ids = [f"p{index}" for index in range(6)]
+        ratings = {player_id: self.model.rating(mu=25, sigma=3) for player_id in player_ids}
+        pregame_ratings = {player_id: calculate_rating(rating) for player_id, rating in ratings.items()}
+        success, updated_ratings, modifiers = process_game_ratings(
+            self.model,
+            [(player_id, 1 if index < 3 else 2) for index, player_id in enumerate(player_ids)],
+            "afk-breakdown",
+            ratings,
+            logging.getLogger("test_afk_breakdown"),
+            set(player_ids),
+            afk_pids={"p0", "p3"},
+            afk_protected_pids={"p4", "p5"},
+            arena_format={
+                "name": "3x2",
+                "team_count": 2,
+                "team_size": 3,
+                "player_count": 6,
+                "placement_count": 2,
+                "tophalf_cutoff": 1,
+            },
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(modifiers["p0"]["afk_penalty_applied"], 1)
+        self.assertLess(modifiers["p0"]["protection_net"], 0)
+        self.assertEqual(modifiers["p4"]["afk_protection_applied"], 1)
+        self.assertGreater(modifiers["p4"]["protection_net"], 0)
+        for player_id in player_ids:
+            self.assertEqual(
+                calculate_rating(updated_ratings[player_id]) - pregame_ratings[player_id],
+                modifiers[player_id]["openskill_rating_change"]
+                + modifiers[player_id]["unbalanced_grace_net"]
+                + modifiers[player_id]["team_gap_net"]
+                + modifiers[player_id]["protection_net"],
+            )
+
     def test_grace_tilt_reallocates_mu_and_keeps_ordinary_sigma(self):
         arena_format = {
             "name": "3x6",
