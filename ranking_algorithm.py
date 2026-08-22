@@ -414,8 +414,8 @@ def process_game_ratings(
         - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a modified team, 0.0 otherwise.
         - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no modifier.
         - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
-        - openskill_rating_change: Displayed-rating change from the ordinary OpenSkill update.
-        - unbalanced_grace_net: Displayed-rating change added by unbalanced-lobby grace before team-gap.
+        - openskill_rating_change: Displayed-rating change before this team's own grace allocation.
+        - unbalanced_grace_net: Displayed-rating change allocated to a team with nonzero grace before team-gap.
         - team_gap_net: Displayed-rating change added or removed by team-gap after grace.
         - protection_net: Net points from placement/AFK protection, AFK penalties,
           and protection-debt redistribution.
@@ -572,8 +572,12 @@ def process_game_ratings(
                 pre_display = calculate_rating(orig_rating)
                 ordinary_display = calculate_rating(ordinary_teams[team_index][player_index])
                 pre_gap_display = calculate_rating(new_teams[team_index][player_index])
-                openskill_rating_change_by_pid[player_id] = int(ordinary_display - pre_display)
-                unbalanced_grace_net_by_pid[player_id] = int(pre_gap_display - ordinary_display)
+                if unbalanced_reductions[team_index] > 0.0:
+                    openskill_rating_change_by_pid[player_id] = int(ordinary_display - pre_display)
+                    unbalanced_grace_net_by_pid[player_id] = int(pre_gap_display - ordinary_display)
+                else:
+                    openskill_rating_change_by_pid[player_id] = int(pre_gap_display - pre_display)
+                    unbalanced_grace_net_by_pid[player_id] = 0
                 pre_gap_display_by_pid[player_id] = pre_gap_display
 
         apply_teammate_gap_penalty(

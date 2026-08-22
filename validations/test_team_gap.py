@@ -284,6 +284,14 @@ class TeamGapTests(unittest.TestCase):
                 + tilted_modifiers[player_id]["team_gap_net"]
                 + tilted_modifiers[player_id]["protection_net"],
             )
+        for index in range(3, 18):
+            player_id = f"p{index}"
+            self.assertEqual(tilted_modifiers[player_id]["unbalanced_reduction_pct"], 0.0)
+            self.assertEqual(tilted_modifiers[player_id]["unbalanced_grace_net"], 0)
+            self.assertEqual(
+                tilted_modifiers[player_id]["openskill_rating_change"],
+                calculate_rating(tilted_ratings[player_id]) - tilted_pre_display[player_id],
+            )
         self.assertAlmostEqual(
             sum(tilted_ratings[f"p{index}"].mu for index in range(3)),
             sum(ordinary_ratings[f"p{index}"].mu for index in range(3)) + sum(allocated),
