@@ -414,6 +414,9 @@ def process_game_ratings(
         - gap_pct: Relative mu gap (1 - mu_low / mu_high) for the high-mu player in a modified team, 0.0 otherwise.
         - gap_scale: Multiplier applied to the high-mu player's delta (0.05-1.0), 1.0 if no modifier.
         - unbalanced_reduction_pct: Temporary mu reduction percentage for unbalanced GM+ teams, 0.0 otherwise.
+        - openskill_rating_change: Displayed-rating change from the ordinary OpenSkill update.
+        - unbalanced_grace_net: Displayed-rating change added by unbalanced-lobby grace before team-gap.
+        - team_gap_net: Displayed-rating change added or removed by team-gap after grace.
         - protection_net: Net points from placement protection/debt redistribution.
           Positive means received protection; negative means paid donor debt.
         - afk_protection_applied: 1 if an AFK-protected teammate was floored to +0, else 0.
@@ -520,9 +523,10 @@ def process_game_ratings(
                 built.append(built_team)
             reconstructed.append(built)
 
-        new_teams = reconstructed[0]
+        ordinary_teams = reconstructed[0]
+        new_teams = ordinary_teams
         if adjusted_teams is not None:
-            ordinary_teams, graced_teams = reconstructed
+            _, graced_teams = reconstructed
             new_teams = []
             for team_idx, orig_team in enumerate(teams):
                 ordinary_team = ordinary_teams[team_idx]
@@ -559,6 +563,19 @@ def process_game_ratings(
                         for p_idx in range(len(orig_team))
                     ])
 
+        openskill_rating_change_by_pid = {}
+        unbalanced_grace_net_by_pid = {}
+        pre_gap_display_by_pid = {}
+        for team_index, orig_team in enumerate(teams):
+            for player_index, orig_rating in enumerate(orig_team):
+                player_id = team_player_ids[team_index][player_index]
+                pre_display = calculate_rating(orig_rating)
+                ordinary_display = calculate_rating(ordinary_teams[team_index][player_index])
+                pre_gap_display = calculate_rating(new_teams[team_index][player_index])
+                openskill_rating_change_by_pid[player_id] = int(ordinary_display - pre_display)
+                unbalanced_grace_net_by_pid[player_id] = int(pre_gap_display - ordinary_display)
+                pre_gap_display_by_pid[player_id] = pre_gap_display
+
         apply_teammate_gap_penalty(
             model,
             teams,
@@ -566,6 +583,12 @@ def process_game_ratings(
             team_player_ids,
             gap_scale_by_pid,
         )
+
+        team_gap_net_by_pid = {}
+        for team_index, team in enumerate(new_teams):
+            for player_index, rating in enumerate(team):
+                player_id = team_player_ids[team_index][player_index]
+                team_gap_net_by_pid[player_id] = int(calculate_rating(rating) - pre_gap_display_by_pid[player_id])
 
         sorted_placings = sorted(teams_by_placing.keys())
         protection_net_by_pid = {}
@@ -602,6 +625,14 @@ def process_game_ratings(
 
                 is_gm = pid in gm_set if gm_set is not None else False
                 protection_cap = (3 if is_gm else 4) if expected_team_size == 2 else team_protection_cap
+                if (
+                    expected_team_size == 3
+                    and gm_count == 1
+                    and is_gm
+                    and repeated_teammate_ids_by_pid is not None
+                    and not repeated_teammate_ids_by_pid[pid]
+                ):
+                    protection_cap = 3
 
                 if placing <= protection_cap and base_delta < 0:
                     new_teams[i][team_player_index] = pre_rating
@@ -666,6 +697,9 @@ def process_game_ratings(
                     "gap_pct": gap_pct_by_pid.get(pid, 0.0),
                     "gap_scale": gap_scale_by_pid.get(pid, 1.0),
                     "unbalanced_reduction_pct": unbalanced_reductions[i],
+                    "openskill_rating_change": openskill_rating_change_by_pid[pid],
+                    "unbalanced_grace_net": unbalanced_grace_net_by_pid[pid],
+                    "team_gap_net": team_gap_net_by_pid[pid],
                     "protection_net": protection_net_by_pid.get(pid, 0),
                     "afk_protection_applied": afk_protection_applied_by_pid.get(pid, 0),
                     "afk_penalty_applied": afk_penalty_applied_by_pid.get(pid, 0),

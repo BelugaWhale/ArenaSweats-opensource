@@ -85,7 +85,7 @@ In order to support solo queue without indirectly buffing boosting, two forms of
 
 **AFK Protection** - If a player would lose rating and has a teammate with 0 kills, fewer than 3 assists, and less than 3000 damage dealt, that player's rating loss is ignored for that game.
 
-**Place Protection** - This is disabled for any team with 2 or more Grandmaster+ players. On a team with no Grandmaster+ players, nobody loses rating if they place 3rd or above. On a team with exactly one Grandmaster+ player, nobody on that team loses rating if they place 2nd or above.
+**Place Protection** - This is disabled for any team with 2 or more Grandmaster+ players. On a team with no Grandmaster+ players, nobody loses rating if they place 3rd or above. On a team with exactly one Grandmaster+ player, nobody on that team loses rating if they place 2nd or above. If that Grandmaster+ player has no repeated teammates, they personally cannot lose rating in 3rd place either.
 
 Protected loss is redistributed to eligible players in 4th-6th place, weighted by placement (6th pays the most, 4th the least).
 
@@ -99,4 +99,3 @@ The "conservative estimate" approach (subtracting 3× uncertainty) is a recommen
 
 -   **validations/openskill_sim**: Simulator code (`openskill_sim.py`, app/chart tooling, and helpers) used to validate behavior against production data.
 -   **ranking_algorithm.py**: **This is the exact code that is used to update ratings for every game played.** The file is commented with detailed information to explain exactly what the code does, and the code itself is available.
-

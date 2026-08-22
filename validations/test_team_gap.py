@@ -13,6 +13,7 @@ from ranking_algorithm import (
     _teammate_penalty_scale,
     _teammate_penalty_scale_gap_pct,
     _unbalanced_grace_reduction_pct,
+    calculate_rating,
     calculate_teammate_gap_modifiers,
     instantiate_rating_model,
     process_game_ratings,
@@ -59,6 +60,7 @@ class TeamGapTests(unittest.TestCase):
             player_id: self.model.rating(mu=mu)
             for player_id, mu in zip(player_ids, [60, 40, 55, 25, 25, 25])
         }
+        pregame_display = {player_id: calculate_rating(rating) for player_id, rating in ratings.items()}
         repeated_teammates = {player_id: set() for player_id in player_ids}
         repeated_teammates["player"] = {"teammate_b"}
         arena_format = {
@@ -71,7 +73,7 @@ class TeamGapTests(unittest.TestCase):
         }
 
         with patch("ranking_algorithm.check_for_unbalanced_lobby", return_value=(None, None)) as grace_check:
-            success, _, _ = process_game_ratings(
+            success, updated_ratings, modifiers = process_game_ratings(
                 self.model,
                 [(player_id, 1 if index < 3 else 2) for index, player_id in enumerate(player_ids)],
                 "test-game",
@@ -84,6 +86,14 @@ class TeamGapTests(unittest.TestCase):
 
         self.assertTrue(success)
         self.assertEqual(grace_check.call_args.kwargs["gm_team_eligible_mask"], [False, False])
+        for player_id in player_ids:
+            self.assertEqual(
+                calculate_rating(updated_ratings[player_id]) - pregame_display[player_id],
+                modifiers[player_id]["openskill_rating_change"]
+                + modifiers[player_id]["unbalanced_grace_net"]
+                + modifiers[player_id]["team_gap_net"]
+                + modifiers[player_id]["protection_net"],
+            )
 
     def test_unbalanced_grace_uses_continuous_tail_slope(self):
         self.assertAlmostEqual(_unbalanced_grace_reduction_pct(0.20), 0.20 * UNBALANCED_TEAM_MU_REDUCTION)
@@ -115,6 +125,50 @@ class TeamGapTests(unittest.TestCase):
         self.assertTrue(success)
         for player_id in player_ids:
             self.assertAlmostEqual(updated_ratings[player_id].sigma, SIGMA_FLOOR)
+
+    def test_solo_gm_without_repeated_teammates_gets_third_place_protection(self):
+        player_ids = [f"p{index}" for index in range(18)]
+        players = [(player_id, index // 3 + 1) for index, player_id in enumerate(player_ids)]
+        arena_format = {
+            "name": "3x6",
+            "team_count": 6,
+            "team_size": 3,
+            "player_count": 18,
+            "placement_count": 6,
+            "tophalf_cutoff": 3,
+        }
+
+        def run(repeated_teammates):
+            ratings = {
+                player_id: self.model.rating(mu=60 if player_id == "p6" else 25, sigma=3)
+                for player_id in player_ids
+            }
+            pregame_rating = calculate_rating(ratings["p6"])
+            success, updated_ratings, modifiers = process_game_ratings(
+                self.model,
+                players,
+                "third-place-protection",
+                ratings,
+                logging.getLogger("test_third_place_protection"),
+                {"p6"},
+                arena_format=arena_format,
+                repeated_teammate_ids_by_pid={
+                    player_id: ({"p7"} if player_id == "p6" and repeated_teammates else set())
+                    for player_id in player_ids
+                },
+            )
+            return success, pregame_rating, updated_ratings, modifiers
+
+        success, pregame_rating, updated_ratings, modifiers = run(False)
+        self.assertTrue(success)
+        self.assertEqual(calculate_rating(updated_ratings["p6"]), pregame_rating)
+        self.assertGreater(modifiers["p6"]["protection_net"], 0)
+        self.assertTrue(any(modifiers[player_id]["protection_net"] < 0 for player_id in player_ids[9:]))
+
+        success, pregame_rating, updated_ratings, modifiers = run(True)
+        self.assertTrue(success)
+        self.assertLess(calculate_rating(updated_ratings["p6"]), pregame_rating)
+        self.assertEqual(modifiers["p6"]["protection_net"], 0)
 
     def test_grace_tilt_reallocates_mu_and_keeps_ordinary_sigma(self):
         arena_format = {
@@ -149,11 +203,13 @@ class TeamGapTests(unittest.TestCase):
             )
         self.assertTrue(success)
 
+        tilted_start = make_ratings()
+        tilted_pre_display = {player_id: calculate_rating(rating) for player_id, rating in tilted_start.items()}
         success, tilted_ratings, tilted_modifiers = process_game_ratings(
             self.model,
             players,
             "grace-tilt-graced",
-            make_ratings(),
+            tilted_start,
             logger,
             set(player_ids),
             arena_format=arena_format,
@@ -173,6 +229,24 @@ class TeamGapTests(unittest.TestCase):
         self.assertAlmostEqual(allocated[2] / allocated[0], stacked_mus[0] / stacked_mus[2])
         self.assertGreater(allocated[2], allocated[1])
         self.assertGreater(allocated[1], allocated[0])
+        for index in range(3):
+            player_id = f"p{index}"
+            self.assertEqual(
+                tilted_modifiers[player_id]["openskill_rating_change"],
+                ordinary_modifiers[player_id]["openskill_rating_change"],
+            )
+            self.assertEqual(tilted_modifiers[player_id]["team_gap_net"], 0)
+            self.assertEqual(
+                tilted_modifiers[player_id]["unbalanced_grace_net"],
+                calculate_rating(tilted_ratings[player_id]) - calculate_rating(ordinary_ratings[player_id]),
+            )
+            self.assertEqual(
+                calculate_rating(tilted_ratings[player_id]) - tilted_pre_display[player_id],
+                tilted_modifiers[player_id]["openskill_rating_change"]
+                + tilted_modifiers[player_id]["unbalanced_grace_net"]
+                + tilted_modifiers[player_id]["team_gap_net"]
+                + tilted_modifiers[player_id]["protection_net"],
+            )
         self.assertAlmostEqual(
             sum(tilted_ratings[f"p{index}"].mu for index in range(3)),
             sum(ordinary_ratings[f"p{index}"].mu for index in range(3)) + sum(allocated),
