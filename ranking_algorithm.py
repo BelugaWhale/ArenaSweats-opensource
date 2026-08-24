@@ -28,9 +28,9 @@ GAP_SATURATION_LOW_MU = 20.0
 # so teams with greater mu spread receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
-# Eligible teams with a positive measured mu-grace budget then have that
-# budget reallocated by UNBALANCED_GRACE_ALLOCATION_Q. Sigma stays on the
-# ordinary no-grace OpenSkill update. Team-gap is applied after that tilt.
+# Eligible teams with positive measured grace then have the complete team
+# mu/sigma grace budget reallocated by UNBALANCED_GRACE_ALLOCATION_Q.
+# Team-gap is applied after that allocation.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_TEAM_MU_REDUCTION = 0.57 if IS_3X6 else 0.22   # Apply 57% of the effective gap in 3v3, or 22% in 2v2
 UNBALANCED_3V3_GRACE_BREAKPOINT = 0.20
@@ -532,7 +532,9 @@ def process_game_ratings(
                 ordinary_team = ordinary_teams[team_idx]
                 graced_team = graced_teams[team_idx]
                 current_mu_grace = [graced_team[p_idx].mu - ordinary_team[p_idx].mu for p_idx in range(len(orig_team))]
+                current_sigma_grace = [graced_team[p_idx].sigma - ordinary_team[p_idx].sigma for p_idx in range(len(orig_team))]
                 team_mu_budget = sum(current_mu_grace)
+                team_sigma_budget = sum(current_sigma_grace)
                 orig_mus = [orig.mu for orig in orig_team]
                 low_mu = min(orig_mus)
                 can_tilt = (
@@ -544,22 +546,26 @@ def process_game_ratings(
                     if low_mu <= 0.0:
                         raise RuntimeError(f"Game {game_id}: non-positive low_mu={low_mu} during grace allocation")
                     weights = [
-                        current_mu_grace[p_idx] * (low_mu / orig_mus[p_idx]) ** UNBALANCED_GRACE_ALLOCATION_Q
+                        (low_mu / orig_mus[p_idx]) ** UNBALANCED_GRACE_ALLOCATION_Q
                         for p_idx in range(len(orig_team))
                     ]
                     weight_total = sum(weights)
                     if weight_total <= 0.0:
                         raise RuntimeError(f"Game {game_id}: non-positive grace allocation weight_total={weight_total}")
-                    new_teams.append([
-                        model.rating(
-                            mu=ordinary_team[p_idx].mu + team_mu_budget * (weights[p_idx] / weight_total),
-                            sigma=ordinary_team[p_idx].sigma,
-                        )
-                        for p_idx in range(len(orig_team))
-                    ])
+                    allocated_team = []
+                    for p_idx in range(len(orig_team)):
+                        share = weights[p_idx] / weight_total
+                        final_sigma = ordinary_team[p_idx].sigma + team_sigma_budget * share
+                        if final_sigma <= 0.0:
+                            raise RuntimeError(f"Game {game_id}: grace allocation produced non-positive sigma={final_sigma}")
+                        allocated_team.append(model.rating(
+                            mu=ordinary_team[p_idx].mu + team_mu_budget * share,
+                            sigma=final_sigma,
+                        ))
+                    new_teams.append(allocated_team)
                 else:
                     new_teams.append([
-                        model.rating(mu=graced_team[p_idx].mu, sigma=ordinary_team[p_idx].sigma)
+                        model.rating(mu=graced_team[p_idx].mu, sigma=graced_team[p_idx].sigma)
                         for p_idx in range(len(orig_team))
                     ])
 

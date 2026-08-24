@@ -15,6 +15,7 @@ from ranking_algorithm import (
     _unbalanced_grace_reduction_pct,
     calculate_rating,
     calculate_teammate_gap_modifiers,
+    check_for_unbalanced_lobby,
     instantiate_rating_model,
     process_game_ratings,
 )
@@ -207,7 +208,7 @@ class TeamGapTests(unittest.TestCase):
                 + modifiers[player_id]["protection_net"],
             )
 
-    def test_grace_tilt_reallocates_mu_and_keeps_ordinary_sigma(self):
+    def test_grace_tilt_reallocates_complete_team_grace_by_mu_gap(self):
         arena_format = {
             "name": "3x6",
             "team_count": 6,
@@ -217,6 +218,7 @@ class TeamGapTests(unittest.TestCase):
             "tophalf_cutoff": 3,
         }
         stacked_mus = [52.0, 50.0, 48.0]
+        stacked_sigmas = [3.5, 4.0, 4.5]
         player_ids = [f"p{index}" for index in range(18)]
         players = [(player_id, index // 3 + 1) for index, player_id in enumerate(player_ids)]
         logger = logging.getLogger("test_grace_tilt")
@@ -225,8 +227,24 @@ class TeamGapTests(unittest.TestCase):
             ratings = {}
             for index, player_id in enumerate(player_ids):
                 mu = stacked_mus[index] if index < 3 else 38.0
-                ratings[player_id] = self.model.rating(mu=mu, sigma=4.0)
+                sigma = stacked_sigmas[index] if index < 3 else 4.0
+                ratings[player_id] = self.model.rating(mu=mu, sigma=sigma)
             return ratings
+
+        rate_input = [[make_ratings()[f"p{index}"] for index in range(team_index * 3, team_index * 3 + 3)] for team_index in range(6)]
+        adjusted_teams, _ = check_for_unbalanced_lobby(self.model, rate_input, logger, gm_team_eligible_mask=[True] * 6)
+        ordinary_output = self.model.rate(rate_input, ranks=list(range(6)))
+        graced_output = self.model.rate(adjusted_teams, ranks=list(range(6)))
+        expected_team_mu_grace = sum(
+            (graced_output[0][index].mu - adjusted_teams[0][index].mu)
+            - (ordinary_output[0][index].mu - rate_input[0][index].mu)
+            for index in range(3)
+        )
+        expected_team_sigma_grace = sum(
+            (graced_output[0][index].sigma - adjusted_teams[0][index].sigma)
+            - (ordinary_output[0][index].sigma - rate_input[0][index].sigma)
+            for index in range(3)
+        )
 
         with patch("ranking_algorithm.UNBALANCED_LOBBY_GRACE_ENABLED", False):
             success, ordinary_ratings, ordinary_modifiers = process_game_ratings(
@@ -257,15 +275,19 @@ class TeamGapTests(unittest.TestCase):
         self.assertEqual(tilted_modifiers["p1"]["gap_scale"], 1.0)
         self.assertEqual(tilted_modifiers["p2"]["gap_scale"], 1.0)
 
-        allocated = []
+        allocated_mu = []
+        allocated_sigma = []
         for index in range(3):
             player_id = f"p{index}"
-            self.assertAlmostEqual(tilted_ratings[player_id].sigma, ordinary_ratings[player_id].sigma)
-            allocated.append(tilted_ratings[player_id].mu - ordinary_ratings[player_id].mu)
-        self.assertGreater(min(allocated), 0.0)
-        self.assertAlmostEqual(allocated[2] / allocated[0], stacked_mus[0] / stacked_mus[2])
-        self.assertGreater(allocated[2], allocated[1])
-        self.assertGreater(allocated[1], allocated[0])
+            allocated_mu.append(tilted_ratings[player_id].mu - ordinary_ratings[player_id].mu)
+            allocated_sigma.append(tilted_ratings[player_id].sigma - ordinary_ratings[player_id].sigma)
+        self.assertAlmostEqual(sum(allocated_mu), expected_team_mu_grace)
+        self.assertAlmostEqual(sum(allocated_sigma), expected_team_sigma_grace)
+        self.assertGreater(min(allocated_mu), 0.0)
+        self.assertAlmostEqual(allocated_mu[2] / allocated_mu[0], stacked_mus[0] / stacked_mus[2])
+        self.assertAlmostEqual(allocated_sigma[2] / allocated_sigma[0], stacked_mus[0] / stacked_mus[2])
+        self.assertGreater(allocated_mu[2], allocated_mu[1])
+        self.assertGreater(allocated_mu[1], allocated_mu[0])
         for index in range(3):
             player_id = f"p{index}"
             self.assertEqual(
@@ -292,9 +314,9 @@ class TeamGapTests(unittest.TestCase):
                 tilted_modifiers[player_id]["openskill_rating_change"],
                 calculate_rating(tilted_ratings[player_id]) - tilted_pre_display[player_id],
             )
-        self.assertAlmostEqual(
-            sum(tilted_ratings[f"p{index}"].mu for index in range(3)),
-            sum(ordinary_ratings[f"p{index}"].mu for index in range(3)) + sum(allocated),
+        self.assertEqual(
+            sum(tilted_modifiers[f"p{index}"]["unbalanced_grace_net"] for index in range(3)),
+            sum(calculate_rating(tilted_ratings[f"p{index}"]) - calculate_rating(ordinary_ratings[f"p{index}"]) for index in range(3)),
         )
 
 
