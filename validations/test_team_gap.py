@@ -234,14 +234,15 @@ class TeamGapTests(unittest.TestCase):
         rate_input = [[make_ratings()[f"p{index}"] for index in range(team_index * 3, team_index * 3 + 3)] for team_index in range(6)]
         adjusted_teams, _ = check_for_unbalanced_lobby(self.model, rate_input, logger, gm_team_eligible_mask=[True] * 6)
         ordinary_output = self.model.rate(rate_input, ranks=list(range(6)))
-        graced_output = self.model.rate(adjusted_teams, ranks=list(range(6)))
+        isolated_input = [[self.model.rating(mu=rating.mu, sigma=rating.sigma) for rating in (adjusted_teams[team_index] if team_index == 0 else rate_input[team_index])] for team_index in range(6)]
+        graced_output = self.model.rate(isolated_input, ranks=list(range(6)))
         expected_team_mu_grace = sum(
-            (graced_output[0][index].mu - adjusted_teams[0][index].mu)
+            (graced_output[0][index].mu - isolated_input[0][index].mu)
             - (ordinary_output[0][index].mu - rate_input[0][index].mu)
             for index in range(3)
         )
         expected_team_sigma_grace = sum(
-            (graced_output[0][index].sigma - adjusted_teams[0][index].sigma)
+            (graced_output[0][index].sigma - isolated_input[0][index].sigma)
             - (ordinary_output[0][index].sigma - rate_input[0][index].sigma)
             for index in range(3)
         )
@@ -318,6 +319,44 @@ class TeamGapTests(unittest.TestCase):
             sum(tilted_modifiers[f"p{index}"]["unbalanced_grace_net"] for index in range(3)),
             sum(calculate_rating(tilted_ratings[f"p{index}"]) - calculate_rating(ordinary_ratings[f"p{index}"]) for index in range(3)),
         )
+
+    def test_each_team_grace_is_isolated_from_other_adjusted_teams(self):
+        raw_ratings = [
+            [(39.4375889544, 2.8611140602), (39.4375889544, 2.8611140602), (38.5516419671, 3.4808456046)],
+            [(53.6550337851, 2.5020304960), (41.6906775871, 2.5), (35.4261087949, 2.5595506175)],
+            [(41.7328170389, 2.6358313129), (40.4051739273, 2.5006528636), (37.9930133482, 3.2295092480)],
+            [(40.9064048812, 2.6772140686), (38.3491050838, 2.5), (36.6444985356, 2.5)],
+            [(49.2069220422, 2.5614671720), (49.1723502736, 2.5256816008), (46.9626904941, 2.9401904225)],
+            [(42.2839181973, 3.0411340658), (38.9886789874, 2.8645757395), (35.9179482565, 2.5034959732)],
+        ]
+        player_ids = [f"p{index}" for index in range(18)]
+        players = [(player_id, index // 3 + 1) for index, player_id in enumerate(player_ids)]
+        gm_set = {f"p{team_index * 3 + player_index}" for team_index in [1, 2, 4] for player_index in [0, 1]}
+        arena_format = {"name": "3x6", "team_count": 6, "team_size": 3, "player_count": 18, "placement_count": 6, "tophalf_cutoff": 3}
+
+        def make_ratings():
+            return {
+                player_ids[team_index * 3 + player_index]: self.model.rating(mu=mu, sigma=sigma)
+                for team_index, team in enumerate(raw_ratings)
+                for player_index, (mu, sigma) in enumerate(team)
+            }
+
+        with patch("ranking_algorithm.UNBALANCED_LOBBY_GRACE_ENABLED", False):
+            success, _, ordinary_modifiers = process_game_ratings(
+                self.model, players, "isolated-ordinary", make_ratings(), logging.getLogger("isolated_grace"), gm_set,
+                arena_format=arena_format,
+            )
+        self.assertTrue(success)
+        success, _, isolated_modifiers = process_game_ratings(
+            self.model, players, "isolated-grace", make_ratings(), logging.getLogger("isolated_grace"), gm_set,
+            arena_format=arena_format,
+        )
+        self.assertTrue(success)
+        self.assertEqual(sum(isolated_modifiers[f"p{index}"]["unbalanced_grace_net"] for index in range(3, 6)), 22)
+        for player_id in player_ids:
+            self.assertEqual(isolated_modifiers[player_id]["openskill_rating_change"], ordinary_modifiers[player_id]["openskill_rating_change"])
+        for index in list(range(3)) + list(range(9, 12)) + list(range(15, 18)):
+            self.assertEqual(isolated_modifiers[f"p{index}"]["unbalanced_grace_net"], 0)
 
 
 if __name__ == "__main__":

@@ -28,8 +28,9 @@ GAP_SATURATION_LOW_MU = 20.0
 # so teams with greater mu spread receive less grace.
 # After rating updates we apply the resulting delta mu/sigma on top of the
 # original (unreduced) mu/sigma.
-# Eligible teams with positive measured grace then have the complete team
-# mu/sigma grace budget reallocated by UNBALANCED_GRACE_ALLOCATION_Q.
+# Each eligible team's complete mu/sigma grace budget is measured in an
+# isolated OpenSkill rerun, then reallocated by UNBALANCED_GRACE_ALLOCATION_Q.
+# This prevents another adjusted team from changing this team's grace.
 # Team-gap is applied after that allocation.
 UNBALANCED_LOBBY_GRACE_ENABLED = True
 UNBALANCED_TEAM_MU_REDUCTION = 0.57 if IS_3X6 else 0.22   # Apply 57% of the effective gap in 3v3, or 22% in 2v2
@@ -500,74 +501,81 @@ def process_game_ratings(
 
         adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_eligible_mask=gm_team_unbalanced_eligible)
         if adjusted_teams is None:
-            rate_input_final = rate_input
             unbalanced_reductions = [0.0] * len(teams)
-        else:
-            rate_input_final = adjusted_teams
-        rate_pairs = [(rate_input, model.rate(rate_input, ranks=ranks))]
-        if adjusted_teams is not None:
-            rate_pairs.append((rate_input_final, model.rate(rate_input_final, ranks=ranks)))
 
-        reconstructed = []
-        for rate_in, rated_out in rate_pairs:
-            built = []
-            for team_idx, orig_team in enumerate(teams):
-                built_team = []
-                for p_idx, orig in enumerate(orig_team):
-                    old_adj = rate_in[team_idx][p_idx]
-                    new_adj = rated_out[team_idx][p_idx]
-                    final_sigma = orig.sigma + (new_adj.sigma - old_adj.sigma)
-                    if final_sigma <= 0.0:
-                        raise RuntimeError(f"Game {game_id}: OpenSkill produced non-positive sigma={final_sigma}")
-                    built_team.append(model.rating(mu=orig.mu + (new_adj.mu - old_adj.mu), sigma=max(final_sigma, SIGMA_FLOOR)))
-                built.append(built_team)
-            reconstructed.append(built)
+        ordinary_output = model.rate(rate_input, ranks=ranks)
+        ordinary_teams = []
+        for team_idx, orig_team in enumerate(teams):
+            ordinary_team = []
+            for p_idx, orig in enumerate(orig_team):
+                final_sigma = orig.sigma + (ordinary_output[team_idx][p_idx].sigma - rate_input[team_idx][p_idx].sigma)
+                if final_sigma <= 0.0:
+                    raise RuntimeError(f"Game {game_id}: OpenSkill produced non-positive sigma={final_sigma}")
+                ordinary_team.append(model.rating(
+                    mu=orig.mu + (ordinary_output[team_idx][p_idx].mu - rate_input[team_idx][p_idx].mu),
+                    sigma=max(final_sigma, SIGMA_FLOOR),
+                ))
+            ordinary_teams.append(ordinary_team)
 
-        ordinary_teams = reconstructed[0]
         new_teams = ordinary_teams
         if adjusted_teams is not None:
-            _, graced_teams = reconstructed
             new_teams = []
             for team_idx, orig_team in enumerate(teams):
                 ordinary_team = ordinary_teams[team_idx]
-                graced_team = graced_teams[team_idx]
+                if unbalanced_reductions[team_idx] <= 0.0:
+                    new_teams.append(ordinary_team)
+                    continue
+
+                isolated_input = [
+                    [
+                        model.rating(mu=rating.mu, sigma=rating.sigma)
+                        for rating in (adjusted_teams[current_team_idx] if current_team_idx == team_idx else rate_input[current_team_idx])
+                    ]
+                    for current_team_idx in range(len(teams))
+                ]
+                isolated_output = model.rate(isolated_input, ranks=ranks)
+                graced_team = []
+                for p_idx, orig in enumerate(orig_team):
+                    final_sigma = orig.sigma + (isolated_output[team_idx][p_idx].sigma - isolated_input[team_idx][p_idx].sigma)
+                    if final_sigma <= 0.0:
+                        raise RuntimeError(f"Game {game_id}: OpenSkill produced non-positive isolated sigma={final_sigma}")
+                    graced_team.append(model.rating(
+                        mu=orig.mu + (isolated_output[team_idx][p_idx].mu - isolated_input[team_idx][p_idx].mu),
+                        sigma=max(final_sigma, SIGMA_FLOOR),
+                    ))
+
                 current_mu_grace = [graced_team[p_idx].mu - ordinary_team[p_idx].mu for p_idx in range(len(orig_team))]
                 current_sigma_grace = [graced_team[p_idx].sigma - ordinary_team[p_idx].sigma for p_idx in range(len(orig_team))]
                 team_mu_budget = sum(current_mu_grace)
                 team_sigma_budget = sum(current_sigma_grace)
+                team_display_budget = 75.0 * (team_mu_budget - 3.0 * team_sigma_budget)
+                if team_mu_budget <= 0.0 or team_display_budget <= 0.0:
+                    raise RuntimeError(
+                        f"Game {game_id}: isolated grace was non-positive for team index {team_idx} "
+                        f"(mu={team_mu_budget}, sigma={team_sigma_budget}, display={team_display_budget})"
+                    )
                 orig_mus = [orig.mu for orig in orig_team]
                 low_mu = min(orig_mus)
-                can_tilt = (
-                    unbalanced_reductions[team_idx] > 0.0
-                    and team_mu_budget > 0.0
-                    and all(delta >= 0.0 for delta in current_mu_grace)
-                )
-                if can_tilt:
-                    if low_mu <= 0.0:
-                        raise RuntimeError(f"Game {game_id}: non-positive low_mu={low_mu} during grace allocation")
-                    weights = [
-                        (low_mu / orig_mus[p_idx]) ** UNBALANCED_GRACE_ALLOCATION_Q
-                        for p_idx in range(len(orig_team))
-                    ]
-                    weight_total = sum(weights)
-                    if weight_total <= 0.0:
-                        raise RuntimeError(f"Game {game_id}: non-positive grace allocation weight_total={weight_total}")
-                    allocated_team = []
-                    for p_idx in range(len(orig_team)):
-                        share = weights[p_idx] / weight_total
-                        final_sigma = ordinary_team[p_idx].sigma + team_sigma_budget * share
-                        if final_sigma <= 0.0:
-                            raise RuntimeError(f"Game {game_id}: grace allocation produced non-positive sigma={final_sigma}")
-                        allocated_team.append(model.rating(
-                            mu=ordinary_team[p_idx].mu + team_mu_budget * share,
-                            sigma=final_sigma,
-                        ))
-                    new_teams.append(allocated_team)
-                else:
-                    new_teams.append([
-                        model.rating(mu=graced_team[p_idx].mu, sigma=graced_team[p_idx].sigma)
-                        for p_idx in range(len(orig_team))
-                    ])
+                if low_mu <= 0.0:
+                    raise RuntimeError(f"Game {game_id}: non-positive low_mu={low_mu} during grace allocation")
+                weights = [
+                    (low_mu / orig_mus[p_idx]) ** UNBALANCED_GRACE_ALLOCATION_Q
+                    for p_idx in range(len(orig_team))
+                ]
+                weight_total = sum(weights)
+                if weight_total <= 0.0:
+                    raise RuntimeError(f"Game {game_id}: non-positive grace allocation weight_total={weight_total}")
+                allocated_team = []
+                for p_idx in range(len(orig_team)):
+                    share = weights[p_idx] / weight_total
+                    final_sigma = ordinary_team[p_idx].sigma + team_sigma_budget * share
+                    if final_sigma <= 0.0:
+                        raise RuntimeError(f"Game {game_id}: grace allocation produced non-positive sigma={final_sigma}")
+                    allocated_team.append(model.rating(
+                        mu=ordinary_team[p_idx].mu + team_mu_budget * share,
+                        sigma=final_sigma,
+                    ))
+                new_teams.append(allocated_team)
 
         openskill_rating_change_by_pid = {}
         unbalanced_grace_net_by_pid = {}
