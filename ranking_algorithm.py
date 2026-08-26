@@ -14,8 +14,8 @@ SIGMA_FLOOR = 2.5
 PENALTY_MIN_MULTIPLIER = 0.05
 GAP_TRIGGER = 0.10
 GAP_SATURATION = 0.55
-GAP_TRIGGER_LOW_MU_RATIO = 0.90
-GAP_SATURATION_LOW_MU = 20.0
+FRESH_GAP_TRIGGER = 0.15
+FRESH_GAP_SATURATION = 0.65
 
 # Unbalanced lobby configuration.
 # A team is considered "unbalanced" if its mu sum is above the lobby's
@@ -129,52 +129,21 @@ def instantiate_rating_model():
 
     return model
 
-def _teammate_penalty_scale_gap_pct(gap_pct: float) -> float:
+def _teammate_penalty_scale_gap_pct(gap_pct: float, trigger=GAP_TRIGGER, saturation=GAP_SATURATION) -> float:
     """
     Compute the multiplier for the high-mu player's mu/sigma delta,
     based on the relative mu gap in [0, 1].
     """
     # Below the trigger we do nothing.
-    if gap_pct <= GAP_TRIGGER:
+    if gap_pct <= trigger:
         return 1.0
 
     # At or above saturation, use the minimum multiplier (flat line).
-    if gap_pct >= GAP_SATURATION:
+    if gap_pct >= saturation:
         return PENALTY_MIN_MULTIPLIER
 
     # Linear drop between trigger and saturation.
-    progress = (gap_pct - GAP_TRIGGER) / (GAP_SATURATION - GAP_TRIGGER)
-    scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * progress
-
-    # Clamp to safety range
-    return max(PENALTY_MIN_MULTIPLIER, min(1.0, scale))
-
-def _teammate_penalty_scale(mu_hi: float, mu_lo: float) -> float:
-    """
-    Compute the team-gap modifier multiplier for the high-mu player's
-    mu/sigma delta.
-
-    Behavior:
-    - No modifier while mu_lo >= 0.90 * mu_hi.
-    - Linear reduction between the trigger and mu_lo == 20.
-    - Full reduction at/below mu_lo == 20, capped by PENALTY_MIN_MULTIPLIER.
-    """
-    trigger_low_mu = mu_hi * GAP_TRIGGER_LOW_MU_RATIO
-
-    # Within the trigger zone we do nothing.
-    if mu_lo >= trigger_low_mu:
-        return 1.0
-
-    # At or below saturation we apply full reduction.
-    if mu_lo <= GAP_SATURATION_LOW_MU:
-        return PENALTY_MIN_MULTIPLIER
-
-    # Degenerate range: trigger and saturation overlap; treat as step.
-    if trigger_low_mu <= GAP_SATURATION_LOW_MU:
-        return PENALTY_MIN_MULTIPLIER
-
-    # Linear drop between trigger and saturation.
-    progress = (trigger_low_mu - mu_lo) / (trigger_low_mu - GAP_SATURATION_LOW_MU)
+    progress = (gap_pct - trigger) / (saturation - trigger)
     scale = 1.0 - (1.0 - PENALTY_MIN_MULTIPLIER) * progress
 
     # Clamp to safety range
@@ -206,9 +175,10 @@ def calculate_teammate_gap_modifiers(teams, gm_team_any, team_player_ids, repeat
                 teammate_id = team_player_ids[team_index][teammate_index]
                 gap_pct = min(1.0, 1.0 - (teammate_rating.mu / player_rating.mu))
                 repeated = repeated_teammates is None or teammate_id in repeated_teammates
-                scale = _teammate_penalty_scale_gap_pct(gap_pct) if repeated else max(
-                    _teammate_penalty_scale_gap_pct(gap_pct),
-                    _teammate_penalty_scale(player_rating.mu, teammate_rating.mu),
+                scale = _teammate_penalty_scale_gap_pct(gap_pct) if repeated else _teammate_penalty_scale_gap_pct(
+                    gap_pct,
+                    FRESH_GAP_TRIGGER,
+                    FRESH_GAP_SATURATION,
                 )
                 if scale < player_gap_scale or (scale == player_gap_scale and gap_pct > player_gap_pct):
                     player_gap_pct = gap_pct

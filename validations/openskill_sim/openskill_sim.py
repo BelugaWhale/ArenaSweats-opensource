@@ -23,8 +23,9 @@ import ranking_algorithm as ranking_algo
 
 # Import production helpers/constants so the sim mirrors real logic
 from ranking_algorithm import (
+    FRESH_GAP_SATURATION,
+    FRESH_GAP_TRIGGER,
     apply_teammate_gap_penalty,
-    _teammate_penalty_scale,
     _teammate_penalty_scale_gap_pct,
     _unbalanced_pair_ratio_scale,
     UNBALANCED_TEAM_MU_REDUCTION,
@@ -816,16 +817,9 @@ for place, team in placing_with_team:
     if gap_pct_val is None or scale_val is None:
         continue
     relative_scale = _teammate_penalty_scale_gap_pct(gap_pct_val)
-    low_mu_scale = _teammate_penalty_scale(hi_rating.mu, lo_rating.mu)
-    trigger_low_mu = hi_rating.mu * ranking_algo.GAP_TRIGGER_LOW_MU_RATIO
-    if lo_rating.mu >= trigger_low_mu:
-        low_mu_gap_pct = 0.0
-    elif lo_rating.mu <= ranking_algo.GAP_SATURATION_LOW_MU:
-        low_mu_gap_pct = 1.0
-    else:
-        low_mu_gap_pct = (trigger_low_mu - lo_rating.mu) / (trigger_low_mu - ranking_algo.GAP_SATURATION_LOW_MU)
+    fresh_scale = _teammate_penalty_scale_gap_pct(gap_pct_val, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION)
     gap_repeat_by_pid[hi_pid] = f"{gap_pct_val*100:.1f}% (scale: {relative_scale*100:.1f}%)"
-    gap_norepeat_by_pid[hi_pid] = f"{low_mu_gap_pct*100:.1f}% (scale: {low_mu_scale*100:.1f}%)"
+    gap_norepeat_by_pid[hi_pid] = f"{gap_pct_val*100:.1f}% (scale: {fresh_scale*100:.1f}%)"
 
 for place, team in placing_with_team:
     show_gap = gm_team_any[place - 1] if gm_mask_provided else True

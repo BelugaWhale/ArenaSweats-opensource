@@ -8,9 +8,10 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ranking_algorithm import (
+    FRESH_GAP_SATURATION,
+    FRESH_GAP_TRIGGER,
     SIGMA_FLOOR,
     UNBALANCED_TEAM_MU_REDUCTION,
-    _teammate_penalty_scale,
     _teammate_penalty_scale_gap_pct,
     _unbalanced_grace_reduction_pct,
     calculate_rating,
@@ -39,7 +40,7 @@ class TeamGapTests(unittest.TestCase):
 
     def test_each_teammate_uses_own_curve_and_lowest_scale_wins(self):
         _, scales, grace_blocked = self.calculate([55, 30], {"teammate_b"})
-        expected_random_scale = max(_teammate_penalty_scale_gap_pct(0.5), _teammate_penalty_scale(60, 30))
+        expected_random_scale = _teammate_penalty_scale_gap_pct(0.5, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION)
         self.assertAlmostEqual(scales["player"], expected_random_scale)
         self.assertEqual(grace_blocked, [False])
 
@@ -47,6 +48,11 @@ class TeamGapTests(unittest.TestCase):
         self.assertAlmostEqual(gaps["player"], 1 - 34 / 60)
         self.assertAlmostEqual(scales["player"], _teammate_penalty_scale_gap_pct(1 - 34 / 60))
         self.assertEqual(grace_blocked, [True])
+
+    def test_fresh_teammate_curve_uses_later_thresholds(self):
+        self.assertEqual(_teammate_penalty_scale_gap_pct(FRESH_GAP_TRIGGER, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION), 1.0)
+        self.assertEqual(_teammate_penalty_scale_gap_pct(FRESH_GAP_SATURATION, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION), 0.05)
+        self.assertLess(_teammate_penalty_scale_gap_pct(FRESH_GAP_TRIGGER), 1.0)
 
     def test_grace_block_uses_repeated_teammates_own_gap(self):
         _, _, grace_blocked = self.calculate([40.21, 30], {"teammate_b"})
