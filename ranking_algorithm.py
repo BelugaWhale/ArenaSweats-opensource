@@ -38,7 +38,7 @@ UNBALANCED_3V3_GRACE_BREAKPOINT = 0.20
 UNBALANCED_3V3_GRACE_TAIL_SLOPE = 0.25
 UNBALANCED_PAIR_RATIO_ALPHA = 2.5 if IS_3X6 else 3.0
 UNBALANCED_GRACE_REPEATED_TEAMMATE_GAP_MIN = 0.33
-UNBALANCED_GRACE_ALLOCATION_Q = 1.0
+UNBALANCED_GRACE_ALLOCATION_Q = 1.5
 '''
 ArenaSweats uses OpenSkill's ThurstoneMostellerFull model for 8-team Arena games.
 Each player is represented by:
@@ -48,7 +48,7 @@ Each player is represented by:
 This module applies production rating updates in three stages:
 1) Base OpenSkill rate() update on all teams.
 2) Optional unbalanced-lobby grace for teams that meet the GM+ threshold,
-   then a q-tilt of that team's measured mu-grace budget toward lower-mu teammates.
+   then a q-tilt of that team's natural mu/sigma grace toward lower-mu teammates.
 3) Team-gap modifier for high-mu players in GM-scoped teams.
 
 REFERENCES:
@@ -153,6 +153,8 @@ def calculate_teammate_gap_modifiers(teams, gm_team_any, team_player_ids, repeat
     """Calculate each player's worst individual teammate-gap modifier."""
     gap_pct_by_pid = {}
     gap_scale_by_pid = {}
+    repeat_team_gap_teammate_by_pid = {}
+    repeat_grace_teammate_by_pid = {}
     unbalanced_grace_blocked_by_team = [False] * len(teams)
 
     for team_index, team in enumerate(teams):
@@ -168,6 +170,10 @@ def calculate_teammate_gap_modifiers(teams, gm_team_any, team_player_ids, repeat
             repeated_teammates = None if repeated_teammate_ids_by_pid is None else repeated_teammate_ids_by_pid[player_id]
             player_gap_pct = 0.0
             player_gap_scale = 1.0
+            player_fresh_teammate_scale = 1.0
+            player_gap_teammate_id = None
+            player_gap_repeated = False
+            player_grace_gap_pct = 0.0
 
             for teammate_index, teammate_rating in enumerate(team):
                 if teammate_index == player_index or teammate_rating.mu >= player_rating.mu:
@@ -180,17 +186,35 @@ def calculate_teammate_gap_modifiers(teams, gm_team_any, team_player_ids, repeat
                     FRESH_GAP_TRIGGER,
                     FRESH_GAP_SATURATION,
                 )
+                if not repeated:
+                    player_fresh_teammate_scale = min(player_fresh_teammate_scale, scale)
                 if scale < player_gap_scale or (scale == player_gap_scale and gap_pct > player_gap_pct):
                     player_gap_pct = gap_pct
                     player_gap_scale = scale
+                    player_gap_teammate_id = teammate_id
+                    player_gap_repeated = repeated_teammates is not None and teammate_id in repeated_teammates
                 if repeated_teammates is not None and teammate_id in repeated_teammates and gap_pct >= UNBALANCED_GRACE_REPEATED_TEAMMATE_GAP_MIN:
                     unbalanced_grace_blocked_by_team[team_index] = True
+                    if gap_pct > player_grace_gap_pct:
+                        player_grace_gap_pct = gap_pct
+                        repeat_grace_teammate_by_pid[player_id] = teammate_id
 
             if player_gap_pct > 0.0:
                 gap_pct_by_pid[player_id] = player_gap_pct
                 gap_scale_by_pid[player_id] = player_gap_scale
+            if player_gap_repeated and player_gap_scale < min(
+                player_fresh_teammate_scale,
+                _teammate_penalty_scale_gap_pct(player_gap_pct, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION),
+            ):
+                repeat_team_gap_teammate_by_pid[player_id] = player_gap_teammate_id
 
-    return gap_pct_by_pid, gap_scale_by_pid, unbalanced_grace_blocked_by_team
+    return (
+        gap_pct_by_pid,
+        gap_scale_by_pid,
+        unbalanced_grace_blocked_by_team,
+        repeat_team_gap_teammate_by_pid,
+        repeat_grace_teammate_by_pid,
+    )
 
 def apply_teammate_gap_penalty(model, teams, new_teams, team_player_ids, gap_scale_by_pid):
     """
@@ -392,6 +416,9 @@ def process_game_ratings(
           and protection-debt redistribution.
         - afk_protection_applied: 1 if an AFK-protected teammate was floored to +0, else 0.
         - afk_penalty_applied: 1 if an AFK player's positive gain was floored to +0, else 0.
+        - repeat_team_gap_teammate_id: Teammate whose repeat status made the selected team-gap curve stricter, else None.
+        - repeat_grace_teammate_id: Teammate whose large repeated gap blocked this player's eligible team grace, else None.
+        - repeat_protection_teammate_id: Teammate whose repeat status removed this solo GM+'s third-place protection, else None.
     """
     
     if arena_format is None:
@@ -449,16 +476,19 @@ def process_game_ratings(
             gm_team_unbalanced_eligible.append(False)
             gm_team_counts.append(0)
 
-    gap_pct_by_pid, gap_scale_by_pid, unbalanced_grace_blocked_by_team = calculate_teammate_gap_modifiers(
+    (
+        gap_pct_by_pid,
+        gap_scale_by_pid,
+        unbalanced_grace_blocked_by_team,
+        repeat_team_gap_teammate_by_pid,
+        repeat_grace_teammate_by_pid,
+    ) = calculate_teammate_gap_modifiers(
         teams,
         gm_team_any,
         team_player_ids,
         repeated_teammate_ids_by_pid,
     )
-    gm_team_unbalanced_eligible = [
-        eligible and not unbalanced_grace_blocked_by_team[team_index]
-        for team_index, eligible in enumerate(gm_team_unbalanced_eligible)
-    ]
+    gm_team_unbalanced_eligible_before_repeat = list(gm_team_unbalanced_eligible)
 
     ranks = list(range(len(teams)))
 
@@ -469,9 +499,22 @@ def process_game_ratings(
                 model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
             ])
 
-        adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(model, rate_input, logger, gm_team_eligible_mask=gm_team_unbalanced_eligible)
+        adjusted_teams, unbalanced_reductions = check_for_unbalanced_lobby(
+            model,
+            rate_input,
+            logger,
+            gm_team_eligible_mask=gm_team_unbalanced_eligible_before_repeat,
+        )
         if adjusted_teams is None:
             unbalanced_reductions = [0.0] * len(teams)
+        repeat_grace_applied_by_team = [
+            unbalanced_grace_blocked_by_team[team_index] and unbalanced_reductions[team_index] > 0.0
+            for team_index in range(len(teams))
+        ]
+        unbalanced_reductions = [
+            0.0 if unbalanced_grace_blocked_by_team[team_index] else unbalanced_reductions[team_index]
+            for team_index in range(len(teams))
+        ]
 
         ordinary_output = model.rate(rate_input, ranks=ranks)
         ordinary_teams = []
@@ -528,21 +571,33 @@ def process_game_ratings(
                 low_mu = min(orig_mus)
                 if low_mu <= 0.0:
                     raise RuntimeError(f"Game {game_id}: non-positive low_mu={low_mu} during grace allocation")
-                weights = [
+                mu_tilts = [
                     (low_mu / orig_mus[p_idx]) ** UNBALANCED_GRACE_ALLOCATION_Q
                     for p_idx in range(len(orig_team))
                 ]
-                weight_total = sum(weights)
-                if weight_total <= 0.0:
-                    raise RuntimeError(f"Game {game_id}: non-positive grace allocation weight_total={weight_total}")
+                mu_weights = [current_mu_grace[p_idx] * mu_tilts[p_idx] for p_idx in range(len(orig_team))]
+                sigma_weights = [current_sigma_grace[p_idx] * mu_tilts[p_idx] for p_idx in range(len(orig_team))]
+                mu_weight_total = sum(mu_weights)
+                sigma_weight_total = sum(sigma_weights)
+                if mu_weight_total <= 0.0:
+                    raise RuntimeError(f"Game {game_id}: non-positive grace allocation mu_weight_total={mu_weight_total}")
+                if team_sigma_budget != 0.0 and (
+                    sigma_weight_total * team_sigma_budget <= 0.0
+                    or any(delta * team_sigma_budget < 0.0 for delta in current_sigma_grace)
+                ):
+                    raise RuntimeError(
+                        f"Game {game_id}: inconsistent sigma grace allocation "
+                        f"(budget={team_sigma_budget}, weight_total={sigma_weight_total}, deltas={current_sigma_grace})"
+                    )
                 allocated_team = []
                 for p_idx in range(len(orig_team)):
-                    share = weights[p_idx] / weight_total
-                    final_sigma = ordinary_team[p_idx].sigma + team_sigma_budget * share
+                    mu_share = mu_weights[p_idx] / mu_weight_total
+                    sigma_share = 0.0 if team_sigma_budget == 0.0 else sigma_weights[p_idx] / sigma_weight_total
+                    final_sigma = ordinary_team[p_idx].sigma + team_sigma_budget * sigma_share
                     if final_sigma <= 0.0:
                         raise RuntimeError(f"Game {game_id}: grace allocation produced non-positive sigma={final_sigma}")
                     allocated_team.append(model.rating(
-                        mu=ordinary_team[p_idx].mu + team_mu_budget * share,
+                        mu=ordinary_team[p_idx].mu + team_mu_budget * mu_share,
                         sigma=final_sigma,
                     ))
                 new_teams.append(allocated_team)
@@ -582,6 +637,7 @@ def process_game_ratings(
         protection_net_by_pid = {}
         afk_protection_applied_by_pid = {}
         afk_penalty_applied_by_pid = {}
+        repeat_protection_teammate_by_pid = {}
         donor_entries = []
         debt_mu = 0.0
         debt_sigma = 0.0
@@ -601,6 +657,21 @@ def process_game_ratings(
                 afk_penalty_applied_by_pid[pid] = 0
                 if team_protection_disabled:
                     continue
+                is_gm = pid in gm_set if gm_set is not None else False
+                protection_cap = (3 if is_gm else 4) if expected_team_size == 2 else team_protection_cap
+                if (
+                    expected_team_size == 3
+                    and gm_count == 1
+                    and is_gm
+                    and repeated_teammate_ids_by_pid is not None
+                ):
+                    repeat_protection_teammate_by_pid[pid] = next(
+                        (teammate_pid for teammate_pid in team_players if teammate_pid != pid and teammate_pid in repeated_teammate_ids_by_pid[pid]),
+                        None,
+                    )
+                    if repeat_protection_teammate_by_pid[pid] is None:
+                        protection_cap = 3
+
                 if afk_protected_pids and pid in afk_protected_pids:
                     continue
                 pre_rating = teams[i][team_player_index]
@@ -610,17 +681,6 @@ def process_game_ratings(
                 base_delta = int(round(post_display - pre_display))
                 base_delta_mu = post_rating.mu - pre_rating.mu
                 base_delta_sigma = post_rating.sigma - pre_rating.sigma
-
-                is_gm = pid in gm_set if gm_set is not None else False
-                protection_cap = (3 if is_gm else 4) if expected_team_size == 2 else team_protection_cap
-                if (
-                    expected_team_size == 3
-                    and gm_count == 1
-                    and is_gm
-                    and repeated_teammate_ids_by_pid is not None
-                    and not repeated_teammate_ids_by_pid[pid]
-                ):
-                    protection_cap = 3
 
                 if placing <= protection_cap and base_delta < 0:
                     new_teams[i][team_player_index] = pre_rating
@@ -693,6 +753,9 @@ def process_game_ratings(
                     "protection_net": protection_net_by_pid.get(pid, 0),
                     "afk_protection_applied": afk_protection_applied_by_pid.get(pid, 0),
                     "afk_penalty_applied": afk_penalty_applied_by_pid.get(pid, 0),
+                    "repeat_team_gap_teammate_id": repeat_team_gap_teammate_by_pid.get(pid),
+                    "repeat_grace_teammate_id": repeat_grace_teammate_by_pid.get(pid) if repeat_grace_applied_by_team[i] else None,
+                    "repeat_protection_teammate_id": repeat_protection_teammate_by_pid.get(pid),
                 }
 
         return True, player_ratings, modifiers

@@ -11,6 +11,7 @@ from ranking_algorithm import (
     FRESH_GAP_SATURATION,
     FRESH_GAP_TRIGGER,
     SIGMA_FLOOR,
+    UNBALANCED_GRACE_ALLOCATION_Q,
     UNBALANCED_TEAM_MU_REDUCTION,
     _teammate_penalty_scale_gap_pct,
     _unbalanced_grace_reduction_pct,
@@ -39,15 +40,19 @@ class TeamGapTests(unittest.TestCase):
         )
 
     def test_each_teammate_uses_own_curve_and_lowest_scale_wins(self):
-        _, scales, grace_blocked = self.calculate([55, 30], {"teammate_b"})
+        _, scales, grace_blocked, repeat_gap, repeat_grace = self.calculate([55, 30], {"teammate_b"})
         expected_random_scale = _teammate_penalty_scale_gap_pct(0.5, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION)
         self.assertAlmostEqual(scales["player"], expected_random_scale)
         self.assertEqual(grace_blocked, [False])
+        self.assertEqual(repeat_gap, {})
+        self.assertEqual(repeat_grace, {})
 
-        gaps, scales, grace_blocked = self.calculate([34, 30], {"teammate_b"})
+        gaps, scales, grace_blocked, repeat_gap, repeat_grace = self.calculate([34, 30], {"teammate_b"})
         self.assertAlmostEqual(gaps["player"], 1 - 34 / 60)
         self.assertAlmostEqual(scales["player"], _teammate_penalty_scale_gap_pct(1 - 34 / 60))
         self.assertEqual(grace_blocked, [True])
+        self.assertEqual(repeat_gap, {"player": "teammate_b"})
+        self.assertEqual(repeat_grace, {"player": "teammate_b"})
 
     def test_fresh_teammate_curve_uses_later_thresholds(self):
         self.assertEqual(_teammate_penalty_scale_gap_pct(FRESH_GAP_TRIGGER, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION), 1.0)
@@ -55,11 +60,13 @@ class TeamGapTests(unittest.TestCase):
         self.assertLess(_teammate_penalty_scale_gap_pct(FRESH_GAP_TRIGGER), 1.0)
 
     def test_grace_block_uses_repeated_teammates_own_gap(self):
-        _, _, grace_blocked = self.calculate([40.21, 30], {"teammate_b"})
+        _, _, grace_blocked, _, repeat_grace = self.calculate([40.21, 30], {"teammate_b"})
         self.assertEqual(grace_blocked, [False])
+        self.assertEqual(repeat_grace, {})
 
-        _, _, grace_blocked = self.calculate([40.19, 55], {"teammate_b"})
+        _, _, grace_blocked, _, repeat_grace = self.calculate([40.19, 55], {"teammate_b"})
         self.assertEqual(grace_blocked, [True])
+        self.assertEqual(repeat_grace, {"player": "teammate_b"})
 
     def test_process_blocks_grace_for_eligible_team(self):
         player_ids = ["player", "teammate_b", "teammate_c", "opponent_a", "opponent_b", "opponent_c"]
@@ -79,7 +86,7 @@ class TeamGapTests(unittest.TestCase):
             "tophalf_cutoff": 1,
         }
 
-        with patch("ranking_algorithm.check_for_unbalanced_lobby", return_value=(None, None)) as grace_check:
+        with patch("ranking_algorithm.check_for_unbalanced_lobby", wraps=check_for_unbalanced_lobby) as grace_check:
             success, updated_ratings, modifiers = process_game_ratings(
                 self.model,
                 [(player_id, 1 if index < 3 else 2) for index, player_id in enumerate(player_ids)],
@@ -92,7 +99,10 @@ class TeamGapTests(unittest.TestCase):
             )
 
         self.assertTrue(success)
-        self.assertEqual(grace_check.call_args.kwargs["gm_team_eligible_mask"], [False, False])
+        self.assertEqual(grace_check.call_args.kwargs["gm_team_eligible_mask"], [True, False])
+        self.assertEqual(modifiers["player"]["repeat_grace_teammate_id"], "teammate_b")
+        self.assertIsNone(modifiers["teammate_b"]["repeat_grace_teammate_id"])
+        self.assertIsNone(modifiers["player"]["repeat_protection_teammate_id"])
         for player_id in player_ids:
             self.assertEqual(
                 calculate_rating(updated_ratings[player_id]) - pregame_display[player_id],
@@ -170,12 +180,14 @@ class TeamGapTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(calculate_rating(updated_ratings["p6"]), pregame_rating)
         self.assertGreater(modifiers["p6"]["protection_net"], 0)
+        self.assertIsNone(modifiers["p6"]["repeat_protection_teammate_id"])
         self.assertTrue(any(modifiers[player_id]["protection_net"] < 0 for player_id in player_ids[9:]))
 
         success, pregame_rating, updated_ratings, modifiers = run(True)
         self.assertTrue(success)
         self.assertLess(calculate_rating(updated_ratings["p6"]), pregame_rating)
         self.assertEqual(modifiers["p6"]["protection_net"], 0)
+        self.assertEqual(modifiers["p6"]["repeat_protection_teammate_id"], "p7")
 
     def test_afk_adjustments_are_included_in_exact_breakdown(self):
         player_ids = [f"p{index}" for index in range(6)]
@@ -242,16 +254,18 @@ class TeamGapTests(unittest.TestCase):
         ordinary_output = self.model.rate(rate_input, ranks=list(range(6)))
         isolated_input = [[self.model.rating(mu=rating.mu, sigma=rating.sigma) for rating in (adjusted_teams[team_index] if team_index == 0 else rate_input[team_index])] for team_index in range(6)]
         graced_output = self.model.rate(isolated_input, ranks=list(range(6)))
-        expected_team_mu_grace = sum(
+        expected_mu_grace = [
             (graced_output[0][index].mu - isolated_input[0][index].mu)
             - (ordinary_output[0][index].mu - rate_input[0][index].mu)
             for index in range(3)
-        )
-        expected_team_sigma_grace = sum(
+        ]
+        expected_sigma_grace = [
             (graced_output[0][index].sigma - isolated_input[0][index].sigma)
             - (ordinary_output[0][index].sigma - rate_input[0][index].sigma)
             for index in range(3)
-        )
+        ]
+        expected_team_mu_grace = sum(expected_mu_grace)
+        expected_team_sigma_grace = sum(expected_sigma_grace)
 
         with patch("ranking_algorithm.UNBALANCED_LOBBY_GRACE_ENABLED", False):
             success, ordinary_ratings, ordinary_modifiers = process_game_ratings(
@@ -291,8 +305,9 @@ class TeamGapTests(unittest.TestCase):
         self.assertAlmostEqual(sum(allocated_mu), expected_team_mu_grace)
         self.assertAlmostEqual(sum(allocated_sigma), expected_team_sigma_grace)
         self.assertGreater(min(allocated_mu), 0.0)
-        self.assertAlmostEqual(allocated_mu[2] / allocated_mu[0], stacked_mus[0] / stacked_mus[2])
-        self.assertAlmostEqual(allocated_sigma[2] / allocated_sigma[0], stacked_mus[0] / stacked_mus[2])
+        mu_tilt_ratio = (stacked_mus[0] / stacked_mus[2]) ** UNBALANCED_GRACE_ALLOCATION_Q
+        self.assertAlmostEqual(allocated_mu[2] / allocated_mu[0], expected_mu_grace[2] / expected_mu_grace[0] * mu_tilt_ratio)
+        self.assertAlmostEqual(allocated_sigma[2] / allocated_sigma[0], expected_sigma_grace[2] / expected_sigma_grace[0] * mu_tilt_ratio)
         self.assertGreater(allocated_mu[2], allocated_mu[1])
         self.assertGreater(allocated_mu[1], allocated_mu[0])
         for index in range(3):
