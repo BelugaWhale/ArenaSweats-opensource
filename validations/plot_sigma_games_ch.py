@@ -18,7 +18,8 @@ parser.add_argument("--output", "-o", help="Output HTML path (default: validatio
 args = parser.parse_args()
 
 db_to_regions = {
-    "DB": ["euw", "br", "sea", "ru", "me"],
+    "DB": ["br", "sea", "ru", "me"],
+    "HORIZON": ["euw"],
     "SCRAPE": ["na", "vn", "las", "tr", "oce"],
     "SPLIT": ["kr", "eune", "lan", "tw", "jp"],
 }
