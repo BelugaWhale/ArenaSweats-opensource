@@ -65,29 +65,58 @@ As covered in [Principle #3](#-arenasweats-ranked-principles), ranked adjustment
 
 There are currently 3 adjustments in place.
 
-### Team Gap Modifier
+### Repeated Teammates
 
-This adjustment applies in teams with at least one GM+ player. When a higher-rated player has much lower-rated teammates, that game is treated as less informative for that higher-rated player. Each lower-rated teammate is compared separately; the largest of those gaps is the one that applies.
+Some adjustments distinguish between regular teammates and repeated teammates. A current teammate is marked as repeated if they appeared in one of that player's previous few games, or if the pair has played enough games together historically. The historical requirement starts at 3 games together and gradually rises to 7 as that player has more total games.
 
-The modifier works by scaling the higher-rated player's post-match μ change and σ change by a multiplier between 1.0 and 0.05.
+### Adjustment 1 - Team Gap Modifier
 
-This scaling is more forgiving when the higher-rated player has not recently played with the same teammate or teammates.
+This adjustment applies to teams with at least one GM+ player. It works in this order:
 
-### Unbalanced Lobby Grace
+1. Each higher-rated player is compared with every lower-rated teammate.
+2. Each comparison uses the repeated-teammate curve if they are repeated teammates, or the regular curve if they are not.
+3. The comparison with the strongest reduction is applied to that player.
 
-This adjustment only applies to teams with 2 or more GM+ players. If such a team enters a lobby where their team strength is significantly above the typical team in that game, the system temporarily reduces their team strength before the OpenSkill update is calculated. This helps compensate for high-rank matchmaking limits where lobbies can have very low upside and high downside for top teams.
+The modifier works by scaling the higher-rated player's post-match μ change and σ change by a multiplier between 1.0 and 0.05. For repeated teammates, scaling starts at a 10% μ gap and reaches the 0.05 minimum multiplier at a 55% gap. For teammates who are not repeated, scaling starts at 15% and reaches the minimum at 65%. Therefore, the repeated teammate team-gap curve is harsher.
 
-The temporary reduction uses 22% of the effective gap in 2v2. In 3v3, it uses 57% through a 20% effective gap, then continues from that point at a 25% slope. Teams with a wider rating gap between teammates get less total grace; more similarly-rated GM+ teams get more. That grace is then shared so lower-rated teammates receive more of it than higher-rated teammates. If a teammate is 20% higher in skill than the lowest-rated player on the team, the lowest-rated player receives 20% more of the grace than they do. The team's overall grace does not increase.
+### Adjustment 2 - Unbalanced Lobby Grace
 
-### Protection
+Unbalanced Lobby Grace helps teams with 2 or more GM+ players when matchmaking places them in a much weaker lobby. Without it, these teams would have very little rating to gain and a great deal to lose, which discourages them from queuing up. It works like this:
+
+1. **Lobby gap:** The team's combined μ is compared with the lobby's median team μ. Grace is available only when the team's μ is higher. It uses 22% of this gap in 2v2. In 3v3 it uses 57% through the first 20% of effective lobby gap, then 25% beyond that point.
+2. **Team gap:** Teams with a large internal skill gap receive less Grace. In 3v3, the lobby gap is scaled by `(lowest teammate μ / highest teammate μ) ^ 2.5`. As a separate anti-boosting measure, grace is blocked if a higher-μ player has a repeated teammate with μ at least 33% below them.
+3. **Player distribution:** OpenSkill first distributes the Grace according to each player's uncertainty (σ). Each player's share is then tilted toward lower-μ teammates using `(lowest teammate μ / player μ) ^ 1.5`, where 1.5 is the current distribution strength (`Q`).
+
+The same distribution is applied separately to μ Grace and σ Grace. The team's total μ Grace and total σ Grace does not change when they are distributed between players.
+
+Unbalanced lobby grace is the ONLY biased adjustment in this ranked algorithm, meaning it gives more positive than negative. This is necessary to offset a match-making limitation that would otherwise discourage people from playing.
+
+### Adjustment 3 - Protection
 
 In order to support solo queue without indirectly buffing boosting, two forms of protection are added:
 
-**AFK Protection** - If a player would lose rating and has a teammate with 0 kills, fewer than 3 assists, and less than 3000 damage dealt, that player's rating loss is ignored for that game.
+**AFK Protection** - If a player would lose rating and has a teammate with 0 kills, fewer than 3 assists, and less than 3000 damage dealt, that player's rating loss is ignored for that game. An identified AFK player's own positive rating gain is also reduced to zero.
 
-**Place Protection** - This is disabled for any team with 2 or more Grandmaster+ players. On a team with no Grandmaster+ players, nobody loses rating if they place 3rd or above. On a team with exactly one Grandmaster+ player, nobody on that team loses rating if they place 2nd or above. If that Grandmaster+ player has no repeated teammates, they personally cannot lose rating in 3rd place either.
+**Place Protection** - Protection is decided separately for each player. In 3v3, a rating loss is reduced to zero at these placements. Grandmaster+ includes Challenger; teammates exclude the player themselves.
 
-Protected loss is redistributed to eligible players in 4th-6th place, weighted by placement (6th pays the most, 4th the least).
+| Your situation | Place protection |
+|---|---|
+| Below Grandmaster, regardless of teammates | 3rd or better |
+| Grandmaster+, with no Grandmaster+ teammates and no repeated teammates | 3rd or better |
+| Grandmaster+, with no Grandmaster+ teammates but a repeated teammate | 2nd or better |
+| Grandmaster+, with a Grandmaster+ teammate | None |
+
+Protected loss is redistributed to eligible players in 4th-6th place, weighted by placement (6th pays the most, 4th the least). This makes this unbiased (balanced positive and negative result)
+
+### Ranked Breakdown
+
+The Ranked Breakdown on the website shows how each match produced its final rating changes. You can switch between all 6 teams and see their pre-game μ and σ, combined team strength, OpenSkill result, Unbalanced Lobby Grace, Team Gap reduction, protection, and final result.
+
+Each player's adjustments are shown in displayed rating points and add up to their final change. An **R** beside a player means a repeated teammate directly affected one of their adjustments; its tooltip names that teammate and explains the effect.
+
+Use the tooltips for in-depth information and breakdown of ranked concepts.
+
+![Example of the Ranked Breakdown on the ArenaSweats website](imgs/rankedbreakdown_example.png)
 
 ### 🏆 Your Final Rating
 
@@ -97,5 +126,4 @@ The "conservative estimate" approach (subtracting 3× uncertainty) is a recommen
 
 ## 📁 Codebase Highlights
 
--   **validations/openskill_sim**: Simulator code (`openskill_sim.py`, app/chart tooling, and helpers) used to validate behavior against production data.
 -   **ranking_algorithm.py**: **This is the exact code that is used to update ratings for every game played.** The file is commented with detailed information to explain exactly what the code does, and the code itself is available.

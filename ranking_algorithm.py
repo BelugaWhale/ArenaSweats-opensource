@@ -645,20 +645,14 @@ def process_game_ratings(
         for i, placing in enumerate(sorted_placings):
             team_players = teams_by_placing[placing]
             gm_count = gm_team_counts[i]
-            if expected_team_size == 2:
-                team_protection_disabled = gm_count == 2
-                team_protection_cap = None
-            else:
-                team_protection_disabled = gm_count >= 2
-                team_protection_cap = 2 if gm_count == 1 else tophalf_cutoff
             for team_player_index, pid in enumerate(team_players):
                 protection_net_by_pid[pid] = 0
                 afk_protection_applied_by_pid[pid] = 0
                 afk_penalty_applied_by_pid[pid] = 0
-                if team_protection_disabled:
-                    continue
                 is_gm = pid in gm_set if gm_set is not None else False
-                protection_cap = (3 if is_gm else 4) if expected_team_size == 2 else team_protection_cap
+                if is_gm and gm_count >= 2:
+                    continue
+                protection_cap = (3 if is_gm else 4) if expected_team_size == 2 else (2 if is_gm else tophalf_cutoff)
                 if (
                     expected_team_size == 3
                     and gm_count == 1

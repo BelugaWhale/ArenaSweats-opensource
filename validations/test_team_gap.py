@@ -189,6 +189,68 @@ class TeamGapTests(unittest.TestCase):
         self.assertEqual(modifiers["p6"]["protection_net"], 0)
         self.assertEqual(modifiers["p6"]["repeat_protection_teammate_id"], "p7")
 
+    @patch("ranking_algorithm.UNBALANCED_LOBBY_GRACE_ENABLED", False)
+    def test_place_protection_is_individual_for_every_rank_and_repeat_combination(self):
+        for team_size, team_count, cutoff in [(3, 6, 3), (2, 8, 4)]:
+            player_ids = [f"p{index}" for index in range(team_size * team_count)]
+            players = [(pid, index // team_size + 1) for index, pid in enumerate(player_ids)]
+            arena_format = {
+                "name": f"{team_size}x{team_count}", "team_count": team_count,
+                "team_size": team_size, "player_count": len(player_ids),
+                "placement_count": team_count, "tophalf_cutoff": cutoff,
+            }
+            for placing in [2, 3, 4, 5]:
+                team = player_ids[(placing - 1) * team_size:placing * team_size]
+                for is_gm in [False, True]:
+                    for gm_teammates in range(team_size):
+                        for repeated in [False, True]:
+                            with self.subTest(team_size=team_size, placing=placing, is_gm=is_gm, gm_teammates=gm_teammates, repeated=repeated):
+                                ratings = {pid: self.model.rating(mu=60 if pid in team else 25, sigma=3) for pid in player_ids}
+                                before = {pid: calculate_rating(rating) for pid, rating in ratings.items()}
+                                success, updated, modifiers = process_game_ratings(
+                                    self.model, players, "individual-protection", ratings,
+                                    logging.getLogger("test_individual_protection"),
+                                    set(team[1:1 + gm_teammates]) | ({team[0]} if is_gm else set()),
+                                    arena_format=arena_format,
+                                    repeated_teammate_ids_by_pid={pid: ({team[1]} if pid == team[0] and repeated else set()) for pid in player_ids},
+                                )
+                                self.assertTrue(success)
+                                modifier = modifiers[team[0]]
+                                self.assertLess(modifier["openskill_rating_change"] + modifier["unbalanced_grace_net"] + modifier["team_gap_net"], 0)
+                                protected_through = cutoff
+                                if is_gm:
+                                    protected_through = 0 if gm_teammates else (2 if team_size == 3 and repeated else 3)
+                                if placing <= protected_through:
+                                    self.assertEqual(calculate_rating(updated[team[0]]), before[team[0]])
+                                    self.assertGreater(modifier["protection_net"], 0)
+                                else:
+                                    self.assertLess(calculate_rating(updated[team[0]]), before[team[0]])
+                                    self.assertLessEqual(modifier["protection_net"], 0)
+                                self.assertEqual(
+                                    modifier["repeat_protection_teammate_id"],
+                                    team[1] if team_size == 3 and is_gm and gm_teammates == 0 and repeated else None,
+                                )
+                                for pid in player_ids:
+                                    self.assertEqual(
+                                        calculate_rating(updated[pid]) - before[pid],
+                                        sum(modifiers[pid][key] for key in ["openskill_rating_change", "unbalanced_grace_net", "team_gap_net", "protection_net"]),
+                                    )
+
+    def test_below_gm_donor_with_two_gm_teammates_pays_individually(self):
+        player_ids = [f"p{index}" for index in range(18)]
+        success, _, modifiers = process_game_ratings(
+            self.model, [(pid, index // 3 + 1) for index, pid in enumerate(player_ids)],
+            "individual-donor", {pid: self.model.rating(mu=60 if pid in player_ids[6:9] else 25, sigma=3) for pid in player_ids},
+            logging.getLogger("test_individual_donor"), {"p9", "p10"},
+            arena_format={"name": "3x6", "team_count": 6, "team_size": 3, "player_count": 18, "placement_count": 6, "tophalf_cutoff": 3},
+            repeated_teammate_ids_by_pid={pid: set() for pid in player_ids},
+        )
+        self.assertTrue(success)
+        self.assertGreater(modifiers["p6"]["protection_net"], 0)
+        self.assertEqual(modifiers["p9"]["protection_net"], 0)
+        self.assertEqual(modifiers["p10"]["protection_net"], 0)
+        self.assertLess(modifiers["p11"]["protection_net"], 0)
+
     def test_afk_adjustments_are_included_in_exact_breakdown(self):
         player_ids = [f"p{index}" for index in range(6)]
         ratings = {player_id: self.model.rating(mu=25, sigma=3) for player_id in player_ids}
