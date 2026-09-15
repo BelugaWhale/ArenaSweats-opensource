@@ -598,7 +598,7 @@ def process_game_ratings(
                         raise RuntimeError(f"Game {game_id}: grace allocation produced non-positive sigma={final_sigma}")
                     allocated_team.append(model.rating(
                         mu=ordinary_team[p_idx].mu + team_mu_budget * mu_share,
-                        sigma=final_sigma,
+                        sigma=max(final_sigma, SIGMA_FLOOR),
                     ))
                 new_teams.append(allocated_team)
 
