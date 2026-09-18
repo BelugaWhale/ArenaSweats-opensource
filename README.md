@@ -89,7 +89,7 @@ Unbalanced Lobby Grace helps teams with 2 or more GM+ players when matchmaking p
 
 The same distribution is applied separately to μ Grace and σ Grace. The team's total μ Grace is preserved. The total σ Grace is preserved unless enforcing the 2.5 sigma floor limits a player's allocated reduction.
 
-Unbalanced lobby grace is the ONLY biased adjustment in this ranked algorithm, meaning it gives more positive than negative. This is necessary to offset a match-making limitation that would otherwise discourage people from playing.
+Unbalanced Lobby Grace adds rating overall to offset a matchmaking limitation that would otherwise discourage people from playing. Placement protection can also add rating overall when nobody is eligible to pay for it, as explained below.
 
 ### Adjustment 3 - Protection
 
@@ -106,7 +106,7 @@ In order to support solo queue without indirectly buffing boosting, two forms of
 | Grandmaster+, with no Grandmaster+ teammates but a repeated teammate | 2nd or better |
 | Grandmaster+, with a Grandmaster+ teammate | None |
 
-Protected loss is redistributed to eligible players in 4th-6th place, weighted by placement (6th pays the most, 4th the least). This makes this unbiased (balanced positive and negative result)
+Protected loss is redistributed to eligible players in 4th-6th place, weighted by placement (6th pays the most, 4th the least). Players who cannot receive placement protection do not pay for it, and players receiving AFK protection are also exempt. If nobody is eligible to pay, placement protection still applies without redistributing the loss. In those games, protection adds rating overall; the game is still processed normally.
 
 ### Ranked Breakdown
 

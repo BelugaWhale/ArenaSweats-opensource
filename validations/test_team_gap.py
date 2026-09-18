@@ -251,6 +251,37 @@ class TeamGapTests(unittest.TestCase):
         self.assertEqual(modifiers["p10"]["protection_net"], 0)
         self.assertLess(modifiers["p11"]["protection_net"], 0)
 
+    @patch("ranking_algorithm.UNBALANCED_LOBBY_GRACE_ENABLED", False)
+    def test_protection_without_donors_keeps_the_match_and_exact_breakdown(self):
+        for team_size, team_count, cutoff in [(3, 6, 3), (2, 8, 4)]:
+            for gm_teammates in [False, True]:
+                with self.subTest(team_size=team_size, gm_teammates=gm_teammates):
+                    players = [(f"p{i}", i // team_size + 1) for i in range(team_size * team_count)]
+                    team = [pid for pid, placing in players if placing == cutoff]
+                    ratings = {pid: self.model.rating(mu=60 if pid in team else 25, sigma=3) for pid, _ in players}
+                    before = {pid: rating for pid, rating in ratings.items()}
+                    success, updated, modifiers = process_game_ratings(
+                        self.model, players, "protection-without-donors", ratings,
+                        logging.getLogger("test_protection_without_donors"),
+                        {pid for pid, placing in players if placing > cutoff} | (set(team[1:]) if gm_teammates else set()),
+                        arena_format={"name": f"{team_size}x{team_count}", "team_count": team_count, "team_size": team_size, "player_count": len(players), "placement_count": team_count, "tophalf_cutoff": cutoff},
+                        repeated_teammate_ids_by_pid={pid: set() for pid, _ in players},
+                    )
+                    self.assertTrue(success)
+                    self.assertEqual(len(modifiers), len(players))
+                    self.assertEqual(updated[team[0]].mu, before[team[0]].mu)
+                    self.assertEqual(updated[team[0]].sigma, before[team[0]].sigma)
+                    self.assertLess(modifiers[team[0]]["openskill_rating_change"], 0)
+                    self.assertGreater(modifiers[team[0]]["protection_net"], 0)
+                    self.assertTrue(all(modifier["protection_net"] >= 0 for modifier in modifiers.values()))
+                    for pid, placing in players:
+                        if placing > cutoff:
+                            self.assertEqual(modifiers[pid]["protection_net"], 0)
+                        self.assertEqual(
+                            calculate_rating(updated[pid]) - calculate_rating(before[pid]),
+                            sum(modifiers[pid][key] for key in ["openskill_rating_change", "unbalanced_grace_net", "team_gap_net", "protection_net"]),
+                        )
+
     def test_afk_adjustments_are_included_in_exact_breakdown(self):
         player_ids = [f"p{index}" for index in range(6)]
         ratings = {player_id: self.model.rating(mu=25, sigma=3) for player_id in player_ids}

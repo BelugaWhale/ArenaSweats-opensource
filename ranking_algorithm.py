@@ -687,13 +687,9 @@ def process_game_ratings(
                     donor_weight = float(placing - tophalf_cutoff)
                     donor_entries.append((i, team_player_index, pid, donor_weight))
 
-        if abs(debt_mu) > 1e-12 or abs(debt_sigma) > 1e-12:
+        # Keep placement protection even when no eligible players can fund it.
+        if donor_entries and (abs(debt_mu) > 1e-12 or abs(debt_sigma) > 1e-12):
             weight_total = sum(entry[3] for entry in donor_entries)
-            if weight_total <= 0.0:
-                raise RuntimeError(
-                    f"Game {game_id}: place-protection debt exists (mu={debt_mu}, sigma={debt_sigma}) "
-                    f"but no eligible donor placements {tophalf_cutoff + 1}-{placement_count}"
-                )
 
             for i, team_player_index, pid, donor_weight in donor_entries:
                 donor_rating_before = new_teams[i][team_player_index]
