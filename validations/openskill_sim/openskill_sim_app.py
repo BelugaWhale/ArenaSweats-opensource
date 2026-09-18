@@ -18,6 +18,7 @@ if _SCRIPT_DIR not in sys.path:
 _REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir, os.pardir))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+_PYTHON_BIN = "/home/m/projects/.venv311/bin/python"
 
 from ranking_algorithm import instantiate_rating_model, calculate_rating
 from experiments.experiment_team_gap_population import install_tab as install_team_gap_population_tab
@@ -477,7 +478,6 @@ def ordered_game_columns():
         "champion",
         "avg_worse_opp_rating",
         "avg_better_opp_rating",
-        "sigma_cap_scale",
         "team_gap_scale",
         "unbalanced_reduction_pct",
     ]:
@@ -516,7 +516,7 @@ def configure_games_columns():
         if column_key in {"avg_worse_opp_rating", "avg_better_opp_rating"}:
             width = 175
             anchor = "center"
-        if column_key in {"sigma_cap_scale", "team_gap_pct", "team_gap_scale", "unbalanced_reduction_pct", "pregame_mu", "pregame_sigma", "pregame_rating"}:
+        if column_key in {"team_gap_pct", "team_gap_scale", "unbalanced_reduction_pct", "pregame_mu", "pregame_sigma", "pregame_rating"}:
             width = 160
             anchor = "center"
         if column_key.endswith("_id") or column_key in {"game_id", "puuid"}:
@@ -861,10 +861,10 @@ def make_table_tab(tab_key, title_text):
 
 make_table_tab("players", "Players")
 make_table_tab("requested_summary", "Requested")
-make_table_tab("sigma_cap_summary", "Sigma Cap")
 make_table_tab("gap_penalty_summary", "Gap Penalty")
 make_table_tab("unbalanced_lobby_summary", "Unbalanced")
 make_table_tab("stacked_penalty_summary", "Stacked")
+make_table_tab("modifier_validation_summary", "Validation")
 
 charts_tab = ttk.Frame(notebook, style="Panel.TFrame")
 notebook.add(charts_tab, text="Charts")
@@ -917,10 +917,10 @@ def render_report(report):
 
     for key in [
         "requested_summary",
-        "sigma_cap_summary",
         "gap_penalty_summary",
         "unbalanced_lobby_summary",
         "stacked_penalty_summary",
+        "modifier_validation_summary",
     ]:
         block = report.get("tables", {}).get(key, {})
         render_table(key, block.get("headers", []), block.get("rows", []))
@@ -969,7 +969,7 @@ def run_sim_for_game(game_id):
 
     sim_script = os.path.join(_SCRIPT_DIR, "openskill_sim.py")
     cmd = [
-        sys.executable,
+        _PYTHON_BIN,
         sim_script,
         "--input",
         state["input_path"],
@@ -1123,7 +1123,7 @@ def open_full_charts():
         messagebox.showerror("Missing Input", "Load a game first before opening charts")
         return
     sim_script = os.path.join(_SCRIPT_DIR, "openskill_sim.py")
-    cmd = [sys.executable, sim_script, "--input", state["input_path"]]
+    cmd = [_PYTHON_BIN, sim_script, "--input", state["input_path"]]
     log_console(f"[INFO] Launching full charts command: {' '.join(cmd)}")
     subprocess.Popen(cmd)
 

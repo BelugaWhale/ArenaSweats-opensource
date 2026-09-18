@@ -2,18 +2,16 @@
 import argparse
 import importlib
 import json
-import math
-import sys
-import os
 import logging
+import math
+import os
+import sys
 
-# Ensure Unicode table labels print reliably on Windows/non-UTF8 default consoles.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-# Make repository root importable when running this file directly
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir, os.pardir))
 if _REPO_ROOT not in sys.path:
@@ -21,43 +19,29 @@ if _REPO_ROOT not in sys.path:
 
 import ranking_algorithm as ranking_algo
 
-# Import production helpers/constants so the sim mirrors real logic
 from ranking_algorithm import (
     FRESH_GAP_SATURATION,
     FRESH_GAP_TRIGGER,
-    apply_teammate_gap_penalty,
-    _teammate_penalty_scale_gap_pct,
-    _unbalanced_pair_ratio_scale,
-    UNBALANCED_TEAM_MU_REDUCTION,
     UNBALANCED_PAIR_RATIO_ALPHA,
-    check_for_unbalanced_lobby,
-    process_game_ratings,
-    instantiate_rating_model,
+    apply_teammate_gap_penalty,
+    calculate_teammate_gap_modifiers,
     calculate_rating,
+    check_for_unbalanced_lobby,
+    instantiate_rating_model,
+    process_game_ratings,
+    _teammate_penalty_scale_gap_pct,
+    _unbalanced_grace_reduction_pct,
 )
 
-try:
-    from openskill.models import ThurstoneMostellerFull
-except Exception as e:
-    print("ERROR: This script requires the 'openskill' package.")
-    print("Install with: pip install openskill")
-    print(f"Import error: {e}")
-    sys.exit(1)
-
-# Pretty tables (optional)
-_USE_RICH = True
 try:
     from rich.console import Console
     from rich.table import Table
 
+    _USE_RICH = True
     _console = Console()
 except Exception:
     _USE_RICH = False
-
-# Inactivity decay constants (from the newer sim)
-SIGMA_DECAY_CLAMP = 6.0
-DECAY_GRACE_DAYS = 7
-DECAY_FACTOR = 0.99  # 1% rating decay per day
+    _console = None
 
 
 def _simple_rating(mu: float, sigma: float) -> float:
@@ -72,147 +56,123 @@ def _live_rating_delta(before_rating, after_rating) -> int:
     return int(calculate_rating(after_rating) - calculate_rating(before_rating))
 
 
-def apply_sigma_cap_algo(model, teams, gm_team_any, team_player_ids, logger):
-    rate_input = []
-    sigma_cap_scale_by_pid = {}
+def _build_arena_format(teams, placings, arena_format_data):
+    if arena_format_data:
+        team_count = int(arena_format_data["team_count"])
+        team_size = int(arena_format_data["team_size"])
+        player_count = int(arena_format_data["player_count"])
+        placement_count = int(arena_format_data["placement_count"])
+        tophalf_cutoff = int(arena_format_data["tophalf_cutoff"])
+        name = str(arena_format_data.get("name") or f"{team_size}x{team_count}")
+    else:
+        team_count = len(teams)
+        sizes = {len(team) for team in teams}
+        if len(sizes) != 1:
+            raise ValueError(f"Inconsistent team sizes: {sorted(sizes)}")
+        team_size = next(iter(sizes))
+        player_count = team_count * team_size
+        placement_count = team_count
+        tophalf_cutoff = team_count // 2
+        name = f"{team_size}x{team_count}"
+    if len(placings) != placement_count or sorted(placings) != list(range(1, placement_count + 1)):
+        raise ValueError(f"Placings must be a permutation of [1..{placement_count}]")
+    return {
+        "name": name,
+        "team_count": team_count,
+        "team_size": team_size,
+        "player_count": player_count,
+        "placement_count": placement_count,
+        "tophalf_cutoff": tophalf_cutoff,
+    }
 
-    for idx, team_ratings in enumerate(teams):
-        t_pids = team_player_ids[idx] if team_player_ids else [None, None]
-        has_gm = gm_team_any[idx] if gm_team_any else False
 
-        if has_gm:
-            r0, r1 = team_ratings
-            if r0.mu >= r1.mu:
-                s_high = r0.sigma
-                s_low = r1.sigma
-            else:
-                s_high = r1.sigma
-                s_low = r0.sigma
-            if s_low <= s_high:
-                k = 1.0
-            else:
-                current_team_sigma = math.hypot(r0.sigma, r1.sigma)
-                target_team_sigma = math.hypot(s_high, s_high)
-                if current_team_sigma > 0:
-                    k = target_team_sigma / current_team_sigma
-                else:
-                    k = 1.0
-                    if logger is not None:
-                        logger.warning(
-                            f"Sigma cap skipped for team index {idx}: "
-                            f"current_team_sigma is 0 (r0.sigma={r0.sigma}, r1.sigma={r1.sigma})"
-                        )
-            sigma_cap_scale_by_pid[t_pids[0]] = k
-            sigma_cap_scale_by_pid[t_pids[1]] = k
-            rate_input.append(
-                [
-                    model.rating(mu=r0.mu, sigma=r0.sigma * k),
-                    model.rating(mu=r1.mu, sigma=r1.sigma * k),
-                ]
-            )
-        else:
-            sigma_cap_scale_by_pid[t_pids[0]] = 1.0
-            sigma_cap_scale_by_pid[t_pids[1]] = 1.0
-            rate_input.append(
-                [
-                    model.rating(mu=r.mu, sigma=r.sigma) for r in team_ratings
-                ]
-            )
+def _team_stats(ratings):
+    mu_sum = sum(r.mu for r in ratings)
+    sigma_rms = math.sqrt(sum(r.sigma * r.sigma for r in ratings))
+    return mu_sum, sigma_rms, _simple_rating(mu_sum, sigma_rms)
 
-    return rate_input, sigma_cap_scale_by_pid
+
+def _team_label(team, names_map):
+    return " + ".join(names_map.get(pid) or pid for pid in team)
+
+
+def _render_table(title, headers, rows):
+    if _USE_RICH:
+        table = Table(title=title, show_lines=False)
+        for header in headers:
+            table.add_column(header)
+        for row in rows:
+            table.add_row(*[str(cell) for cell in row])
+        _console.print(table)
+        return
+    print(f"\n{title}")
+    print("=" * 120)
+    print(" | ".join(headers))
+    print("-" * 120)
+    for row in rows:
+        print(" | ".join(str(cell) for cell in row))
 
 
 parser = argparse.ArgumentParser(
     description="Run OpenSkill validation sim using either a local JSON input or a direct ClickHouse game pull."
 )
-parser.add_argument("--input", help="Path to sim input JSON. Defaults to validations/sim_inputs/sim_inputs_28.json.")
+parser.add_argument("--input", help="Path to sim input JSON.")
 parser.add_argument("input_positional", nargs="?", help=argparse.SUPPRESS)
 parser.add_argument("--game-id", help="Target game_id to pull from ClickHouse.")
-parser.add_argument("--region", help="Region for ClickHouse tables (for example: euw, na, oce).")
-parser.add_argument("--ch-prefix", help="Optional env prefix override (for example: HORIZONCH, EAGLECH, DBCH, SCRAPECH, SPLITCH).")
+parser.add_argument("--region", help="Region for ClickHouse tables.")
+parser.add_argument("--ch-prefix", help="Optional env prefix override.")
 parser.add_argument("--save-input", help="Optional path to save the fetched ClickHouse game in sim-input JSON format.")
 parser.add_argument("--export-report", help="Optional path to write a machine-readable JSON report for UI consumers.")
 parser.add_argument("--no-charts", action="store_true", help="Disable chart rendering and experiment plots.")
 args = parser.parse_args()
+
 if args.input and args.input_positional:
     raise ValueError("Provide input only once: use either --input or positional input path.")
 input_arg = args.input or args.input_positional
-
 if input_arg and (args.game_id or args.region or args.ch_prefix):
     raise ValueError("Cannot combine --input with --game-id/--region/--ch-prefix.")
-if args.ch_prefix and not (args.game_id or args.region):
+if args.ch_prefix and not (args.game_id and args.region):
     raise ValueError("--ch-prefix requires --game-id and --region.")
-if args.save_input and not (args.game_id or args.region):
+if args.save_input and not (args.game_id and args.region):
     raise ValueError("--save-input requires --game-id and --region.")
 
+input_path = None
+game_id = None
+region = None
 if args.game_id or args.region:
     if not args.game_id or not args.region:
         raise ValueError("Both --game-id and --region are required when running from ClickHouse.")
-
     game_id = args.game_id.strip()
+    region = args.region.strip().lower()
     if not game_id:
         raise ValueError("game_id cannot be empty.")
-    region = args.region.strip().lower()
     if not region:
-        raise ValueError("Region cannot be empty.")
-
-    try:
-        private_ch_loader = importlib.import_module("openskill_sim_ch_private")
-    except Exception as e:
-        raise RuntimeError(
-            "ClickHouse mode requires local private module validations/openskill_sim/openskill_sim_ch_private.py. "
-            "That module must expose load_sim_input_from_clickhouse(game_id, region, ch_prefix). "
-            f"Import error: {e}"
-        ) from e
-
+        raise ValueError("region cannot be empty.")
+    private_ch_loader = importlib.import_module("openskill_sim_ch_private")
     if not hasattr(private_ch_loader, "load_sim_input_from_clickhouse"):
-        raise RuntimeError(
-            "Module openskill_sim_ch_private is missing load_sim_input_from_clickhouse(game_id, region, ch_prefix)."
-        )
+        raise RuntimeError("openskill_sim_ch_private.py is missing load_sim_input_from_clickhouse(game_id, region, ch_prefix).")
     if not hasattr(private_ch_loader, "REGION_TO_CH_PREFIX"):
-        raise RuntimeError("Module openskill_sim_ch_private is missing REGION_TO_CH_PREFIX.")
-
-    region_to_ch_prefix = private_ch_loader.REGION_TO_CH_PREFIX
-    if not isinstance(region_to_ch_prefix, dict) or not region_to_ch_prefix:
-        raise RuntimeError("REGION_TO_CH_PREFIX in openskill_sim_ch_private.py must be a non-empty dict.")
-
-    ch_prefix = (args.ch_prefix or region_to_ch_prefix.get(region, "")).strip().upper()
+        raise RuntimeError("openskill_sim_ch_private.py is missing REGION_TO_CH_PREFIX.")
+    ch_prefix = (args.ch_prefix or private_ch_loader.REGION_TO_CH_PREFIX.get(region, "")).strip().upper()
     if not ch_prefix:
-        known_regions = ", ".join(sorted(region_to_ch_prefix.keys()))
-        raise ValueError(f"Unknown region '{region}'. Known regions: {known_regions}")
-
+        raise ValueError(f"Unknown region '{region}'.")
     data = private_ch_loader.load_sim_input_from_clickhouse(game_id=game_id, region=region, ch_prefix=ch_prefix)
-    if not isinstance(data, dict):
-        raise TypeError(
-            "load_sim_input_from_clickhouse(game_id, region, ch_prefix) must return a dict compatible with sim input JSON."
-        )
-
     if args.save_input:
-        output_dir = os.path.dirname(args.save_input) or "."
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(args.save_input) or ".", exist_ok=True)
         with open(args.save_input, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         print(f"Wrote sim input JSON: {args.save_input}")
-
     print(f"Using game_id={game_id} region={region} from ClickHouse\n")
 else:
     input_path = input_arg or os.path.join(_SCRIPT_DIR, os.pardir, "sim_inputs", "sim_inputs_28.json")
     if not os.path.exists(input_path):
-        raise FileNotFoundError(
-            f"Sim input not found: {input_path}. "
-            "Provide --game-id/--region for direct ClickHouse mode or pass --input."
-        )
+        raise FileNotFoundError(f"Sim input not found: {input_path}")
     print(f"Using input: {input_path}\n")
     with open(input_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-
-# ----------------------------------------------------------------------
-# INPUT VALIDATION
-# ----------------------------------------------------------------------
 players = data["players"]
-names_map = {p.get("id"): p.get("name", "") for p in players}
 teams = data["teams"]
 placings = data["placings"]
 targets = data.get("targets") or {}
@@ -220,105 +180,95 @@ target_games = data.get("target_games")
 if not target_games:
     raise ValueError("target_games with modifiers are required in the sim input.")
 
-required_modifier_keys = {"sigma_cap_scale", "team_gap_pct", "team_gap_scale", "unbalanced_reduction_pct"}
+arena_format = _build_arena_format(teams, placings, data.get("arena_format"))
+player_ids = [str(player["id"]) for player in players]
+player_id_set = set(player_ids)
+if len(players) != arena_format["player_count"]:
+    raise ValueError(f"Expected {arena_format['player_count']} players, got {len(players)}")
+if len(set(player_ids)) != len(player_ids):
+    raise ValueError("Player IDs must be unique.")
+if len(teams) != arena_format["team_count"]:
+    raise ValueError(f"Expected {arena_format['team_count']} teams, got {len(teams)}")
+for index, team in enumerate(teams, start=1):
+    if len(team) != arena_format["team_size"]:
+        raise ValueError(
+            f"Team index {index} must have exactly {arena_format['team_size']} players, got {len(team)}"
+        )
+used_ids = {str(pid) for team in teams for pid in team}
+if used_ids != player_id_set:
+    raise ValueError("Teams must reference the player IDs exactly once.")
+
+required_modifier_keys = {"team_gap_pct", "team_gap_scale", "unbalanced_reduction_pct", "is_gm"}
+names_map = {str(player["id"]): player.get("name", "") for player in players}
+if data.get("recent_teammate_repeat_by_pid") is not None:
+    raise ValueError("Legacy recent_teammate_repeat_by_pid input cannot identify which teammate repeated; reload the game.")
+repeated_teammate_ids_by_pid = data.get("repeated_teammate_ids_by_pid")
+if repeated_teammate_ids_by_pid is not None:
+    repeated_teammate_ids_by_pid = {
+        str(pid): {str(teammate_id) for teammate_id in teammate_ids}
+        for pid, teammate_ids in repeated_teammate_ids_by_pid.items()
+    }
+
 gm_set = set()
-target_game_ids = set()
-recent_teammate_repeat_by_pid = data.get("recent_teammate_repeat_by_pid")
-if recent_teammate_repeat_by_pid is not None:
-    recent_teammate_repeat_by_pid = {str(pid): bool(value) for pid, value in recent_teammate_repeat_by_pid.items()}
-target_games_have_recent_teammate_repeat = any("recent_teammate_repeat" in tg for tg in target_games)
-for tg in target_games:
-    pid = tg.get("player_id")
+target_by_pid = {}
+afk_pids = set()
+afk_protected_pids = set()
+for target_game in target_games:
+    pid = str(target_game.get("player_id") or "")
     if not pid:
         raise ValueError("Each target_games entry must include player_id.")
-    missing = required_modifier_keys - set(tg.keys())
+    missing = required_modifier_keys - set(target_game.keys())
     if missing:
         raise ValueError(f"Missing modifier fields for player {pid}: {sorted(missing)}")
-    sigma_cap_scale = float(tg["sigma_cap_scale"])
-    team_gap_pct = float(tg["team_gap_pct"])
-    team_gap_scale = float(tg["team_gap_scale"])
-    unbalanced_reduction_pct = float(tg["unbalanced_reduction_pct"])
-    is_default_sigma = math.isclose(sigma_cap_scale, 1.0, rel_tol=1e-9, abs_tol=1e-9)
-    is_default_gap_pct = math.isclose(team_gap_pct, 0.0, rel_tol=1e-9, abs_tol=1e-9)
-    is_default_gap_scale = math.isclose(team_gap_scale, 1.0, rel_tol=1e-9, abs_tol=1e-9)
-    is_default_unbalanced = math.isclose(unbalanced_reduction_pct, 0.0, rel_tol=1e-9, abs_tol=1e-9)
-    target_game_ids.add(pid)
-    if not (is_default_sigma and is_default_gap_pct and is_default_gap_scale and is_default_unbalanced):
+    target_by_pid[pid] = target_game
+    if not isinstance(target_game["is_gm"], bool):
+        raise ValueError(f"is_gm must be an explicit boolean for player {pid}.")
+    if int(target_game.get("afk_penalty_applied", 0)) == 1:
+        afk_pids.add(pid)
+    if int(target_game.get("afk_protection_applied", 0)) == 1:
+        afk_protected_pids.add(pid)
+    if target_game["is_gm"]:
         gm_set.add(pid)
-    if target_games_have_recent_teammate_repeat:
-        if "recent_teammate_repeat" not in tg:
-            raise ValueError("target_games must include recent_teammate_repeat for every player when any row includes it.")
-        if recent_teammate_repeat_by_pid is None:
-            recent_teammate_repeat_by_pid = {}
-        recent_teammate_repeat_by_pid[str(pid)] = bool(tg["recent_teammate_repeat"])
+if set(target_by_pid.keys()) != player_id_set:
+    raise ValueError("target_games must include every player exactly once.")
+if repeated_teammate_ids_by_pid is not None and set(repeated_teammate_ids_by_pid.keys()) != player_id_set:
+    raise ValueError("repeated_teammate_ids_by_pid must include every player when provided.")
 
-if target_game_ids != {p["id"] for p in players}:
-    raise ValueError("target_games must include modifiers for all 16 players.")
-if recent_teammate_repeat_by_pid is not None and set(recent_teammate_repeat_by_pid.keys()) != {str(p["id"]) for p in players}:
-    raise ValueError("recent_teammate_repeat_by_pid must include all 16 players when provided.")
-
-gm_mask_provided = True
-
-# Validate inputs
-if len(players) != 16:
-    raise ValueError(f"Expected 16 players, got {len(players)}")
-if len(teams) != 8:
-    raise ValueError(f"Expected 8 teams, got {len(teams)}")
-for i, t in enumerate(teams, start=1):
-    if len(t) != 2:
-        raise ValueError(f"Team index {i} must have exactly 2 players, got {len(t)}")
-if sorted(placings) != [1, 2, 3, 4, 5, 6, 7, 8]:
-    raise ValueError("Placings must be a permutation of [1..8] (1=best, 8=worst)")
-
-ids = [p["id"] for p in players]
-if len(set(ids)) != 16:
-    raise ValueError("Player IDs must be unique (16 unique IDs required).")
-used = {pid for team in teams for pid in team}
-if used != set(ids):
-    missing = set(ids) - used
-    extra = used - set(ids)
-    details = []
-    if missing:
-        details.append(f"missing in teams: {sorted(missing)}")
-    if extra:
-        details.append(f"unknown ids in teams: {sorted(extra)}")
-    raise ValueError("Teams must reference the 16 players exactly; " + ", ".join(details))
-
-# ----------------------------------------------------------------------
-# BASELINE (NO SPECIAL PENALTIES UNLESS RECORDED IN INPUTS)
-# ----------------------------------------------------------------------
 model = instantiate_rating_model()
-
 before_ratings = {}
-for p in players:
-    mu = float(p.get("mu", 25.0))
-    sigma = float(p.get("sigma", 25.0 / 3.0))
-    before_ratings[p["id"]] = model.rating(mu=mu, sigma=sigma)
+for player in players:
+    mu = float(player.get("mu", 25.0))
+    sigma = float(player.get("sigma", 25.0 / 3.0))
+    before_ratings[str(player["id"])] = model.rating(mu=mu, sigma=sigma)
 
-placing_with_team = list(zip(placings, teams))
-placing_with_team.sort(key=lambda x: x[0])
-
-teams_ratings = []
-team_order_ids = []
+placing_with_team = list(zip(placings, [[str(pid) for pid in team] for team in teams]))
+placing_with_team.sort(key=lambda item: item[0])
+team_order_ids = [team for _, team in placing_with_team]
+teams_ratings = [[before_ratings[pid] for pid in team] for team in team_order_ids]
 gm_team_any = []
-gm_team_both = []
-for placing, team in placing_with_team:
-    r0 = before_ratings[team[0]]
-    r1 = before_ratings[team[1]]
-    teams_ratings.append([r0, r1])
-    team_order_ids.append(team)
+gm_team_unbalanced_eligible = []
+for team in team_order_ids:
     gm_count = sum(1 for pid in team if pid in gm_set)
     gm_team_any.append(gm_count >= 1)
-    gm_team_both.append(gm_count == 2)
+    gm_team_unbalanced_eligible.append(gm_count >= min(2, arena_format["team_size"]))
 
-ranks = list(range(8))
+gap_pct_by_pid, gap_scale_by_pid, unbalanced_grace_blocked_by_team, _, _ = calculate_teammate_gap_modifiers(
+    teams_ratings,
+    gm_team_any,
+    team_order_ids,
+    repeated_teammate_ids_by_pid,
+)
+gm_team_unbalanced_eligible = [
+    eligible and not unbalanced_grace_blocked_by_team[team_index]
+    for team_index, eligible in enumerate(gm_team_unbalanced_eligible)
+]
 
-new_teams = model.rate(teams_ratings, ranks=ranks)
+ranks = list(range(arena_format["team_count"]))
+baseline_rated = model.rate(teams_ratings, ranks=ranks)
 baseline_after_ratings = dict(before_ratings)
-for idx, new_pair in enumerate(new_teams):
-    pid0, pid1 = team_order_ids[idx]
-    baseline_after_ratings[pid0] = new_pair[0]
-    baseline_after_ratings[pid1] = new_pair[1]
+for team_index, team in enumerate(team_order_ids):
+    for player_index, pid in enumerate(team):
+        baseline_after_ratings[pid] = baseline_rated[team_index][player_index]
 
 ranking_logger = logging.getLogger("openskill_sim.ranking")
 ranking_logger.setLevel(logging.WARNING)
@@ -328,100 +278,80 @@ if not ranking_logger.handlers:
     ranking_logger.addHandler(handler)
 
 players_for_process = []
-for idx, place in enumerate(placings):
-    team = teams[idx]
+for placing, team in placing_with_team:
     for pid in team:
-        players_for_process.append((pid, place))
+        players_for_process.append((pid, placing))
 
-player_ratings_input = {}
-for pid, rating in before_ratings.items():
-    player_ratings_input[pid] = model.rating(mu=rating.mu, sigma=rating.sigma)
-
-gm_for_process = gm_set if gm_set else set()
-game_id = data.get("source_game_id", "simulation_game")
-
-success, production_map, _ = process_game_ratings(
+player_ratings_input = {
+    pid: model.rating(mu=rating.mu, sigma=rating.sigma)
+    for pid, rating in before_ratings.items()
+}
+source_game_id = str(data.get("source_game_id", "simulation_game"))
+success, production_map, production_modifiers = process_game_ratings(
     model,
     players_for_process,
-    game_id,
+    source_game_id,
     player_ratings_input,
     ranking_logger,
-    gm_for_process,
-    recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
+    gm_set if gm_set else set(),
+    arena_format=arena_format,
+    afk_pids=afk_pids or None,
+    afk_protected_pids=afk_protected_pids or None,
+    repeated_teammate_ids_by_pid=repeated_teammate_ids_by_pid,
 )
 if not success:
     raise RuntimeError("Ranking algorithm pipeline failed for the simulated game.")
 production_after_ratings = {pid: production_map[pid] for pid in before_ratings}
 
-# ----------------------------------------------------------------------
-# BASELINE OUTPUTS
-# ----------------------------------------------------------------------
 print("\nTeams & Placings (1 = best)")
-print("=" * 30)
-print("Place | Player A | Player B")
-print("------|----------|----------")
-for place, team in placing_with_team:
-    print(f"{place:5} | {team[0]:8} | {team[1]:8}")
+print("=" * 40)
+for placing, team in placing_with_team:
+    print(f"{placing:>2} | {_team_label(team, names_map)}")
 
 print("\nPer-Player Rating Changes")
-print("=" * 45)
-print("Player | mu_before | mu_after | Δmu      | sigma_before | sigma_after | Δsigma")
-print("-------|-----------|----------|----------|--------------|-------------|--------")
+print("=" * 70)
 for pid in sorted(before_ratings.keys()):
-    b = before_ratings[pid]
-    a = production_after_ratings[pid]
+    before = before_ratings[pid]
+    after = production_after_ratings[pid]
     print(
-        f"{pid:6} | {b.mu:9.4f} | {a.mu:8.4f} | {a.mu - b.mu:8.5f} | "
-        f"{b.sigma:12.4f} | {a.sigma:11.4f} | {a.sigma - b.sigma:7.5f}"
+        f"{names_map.get(pid) or pid:36} | "
+        f"mu {before.mu:7.3f} -> {after.mu:7.3f} | "
+        f"sigma {before.sigma:6.3f} -> {after.sigma:6.3f} | "
+        f"rating {_live_rating_delta(before, after):+d}"
     )
 
-# Target comparison if provided
 target_comparison_rows = []
 mu_rmse = None
-s_rmse = None
+sigma_rmse = None
 if targets:
-    print("\nComparison vs. Provided Target End Ratings")
-    print("=" * 50)
-    print("Player | mu_calc | mu_target | mu_err   | sigma_calc | sigma_target | sigma_err")
-    print("-------|---------|-----------|----------|------------|--------------|----------")
     mu_sq_err = []
-    s_sq_err = []
+    sigma_sq_err = []
     for pid in sorted(production_after_ratings.keys()):
-        a = production_after_ratings[pid]
-        t = targets.get(pid)
-        if not t:
+        if pid not in targets:
             continue
-        t_mu = float(t["mu"])
-        if t_mu == 0.0:
-            continue
-        mu_err = a.mu - t_mu
-        s_err = a.sigma - float(t["sigma"])
+        calc_rating_obj = production_after_ratings[pid]
+        target_mu = float(targets[pid]["mu"])
+        target_sigma = float(targets[pid]["sigma"])
+        mu_err = calc_rating_obj.mu - target_mu
+        sigma_err = calc_rating_obj.sigma - target_sigma
         target_comparison_rows.append(
             {
-                "player": pid,
-                "mu_calc": a.mu,
-                "mu_target": t_mu,
+                "player": names_map.get(pid) or pid,
+                "mu_calc": calc_rating_obj.mu,
+                "mu_target": target_mu,
                 "mu_err": mu_err,
-                "sigma_calc": a.sigma,
-                "sigma_target": float(t["sigma"]),
-                "sigma_err": s_err,
+                "sigma_calc": calc_rating_obj.sigma,
+                "sigma_target": target_sigma,
+                "sigma_err": sigma_err,
             }
         )
-        mu_sq_err.append(mu_err**2)
-        s_sq_err.append(s_err**2)
-        print(
-            f"{pid:6} | {a.mu:7.4f} | {t_mu:9.4f} | {mu_err:8.5f} | "
-            f"{a.sigma:10.4f} | {float(t['sigma']):12.4f} | {s_err:9.5f}"
-        )
+        mu_sq_err.append(mu_err * mu_err)
+        sigma_sq_err.append(sigma_err * sigma_err)
+    if mu_sq_err:
+        mu_rmse = math.sqrt(sum(mu_sq_err) / len(mu_sq_err))
+    if sigma_sq_err:
+        sigma_rmse = math.sqrt(sum(sigma_sq_err) / len(sigma_sq_err))
 
-    if mu_sq_err or s_sq_err:
-        mu_rmse = math.sqrt(sum(mu_sq_err) / max(1, len(mu_sq_err)))
-        s_rmse = math.sqrt(sum(s_sq_err) / max(1, len(s_sq_err)))
-        print(f"\nRMSE: mu={mu_rmse:.5f}  sigma={s_rmse:.5f}")
-
-# ----------------------------------------------------------------------
-# REQUESTED SUMMARY TABLE (BASELINE)
-# ----------------------------------------------------------------------
 headers_req = [
     "placing",
     "player",
@@ -432,358 +362,132 @@ headers_req = [
     "rating_change",
 ]
 rows_req = []
-
-pre_team = {}
-post_team = {}
-
-for place, team in placing_with_team:
-    b0 = before_ratings[team[0]]
-    b1 = before_ratings[team[1]]
-    a0 = baseline_after_ratings[team[0]]
-    a1 = baseline_after_ratings[team[1]]
-
-    pre_mu_sum = b0.mu + b1.mu
-    pre_sig_sum = math.hypot(b0.sigma, b1.sigma)
-    pre_rate_sum = _simple_rating(pre_mu_sum, pre_sig_sum)
-
-    post_mu_sum = a0.mu + a1.mu
-    post_sig_sum = math.hypot(a0.sigma, a1.sigma)
-    post_rate_sum = _simple_rating(post_mu_sum, post_sig_sum)
-
-    pre_team[place] = (pre_mu_sum, pre_sig_sum, pre_rate_sum)
-    post_team[place] = (post_mu_sum, post_sig_sum, post_rate_sum)
-
-    for idx, pid in enumerate(team):
-        name = names_map.get(pid) or pid
-        b = before_ratings[pid]
-        a = baseline_after_ratings[pid]
-
-        pre_player_rating = calculate_rating(b)
-        post_player_rating = calculate_rating(a)
-        delta_rating = post_player_rating - pre_player_rating
-
-        pre_player_str = f"{b.mu:.2f} {b.sigma:.2f} ({pre_player_rating})"
-        post_player_str = f"{a.mu:.2f} {a.sigma:.2f} ({post_player_rating})"
-
-        if idx == 0:
-            pre_team_str = f"{pre_mu_sum:.2f} {pre_sig_sum:.2f} ({pre_rate_sum:.2f})"
-            post_team_str = f"{post_mu_sum:.2f} {post_sig_sum:.2f} ({post_rate_sum:.2f})"
-        else:
-            pre_team_str = ""
-            post_team_str = ""
-
+pre_team_stats_by_place = {}
+baseline_team_stats_by_place = {}
+for placing, team in placing_with_team:
+    pre_team = [before_ratings[pid] for pid in team]
+    post_team = [baseline_after_ratings[pid] for pid in team]
+    pre_team_stats_by_place[placing] = _team_stats(pre_team)
+    baseline_team_stats_by_place[placing] = _team_stats(post_team)
+    for player_index, pid in enumerate(team):
+        before = before_ratings[pid]
+        after = baseline_after_ratings[pid]
+        pre_team_str = ""
+        post_team_str = ""
+        if player_index == 0:
+            pre_mu_sum, pre_sigma_rms, pre_team_rating = pre_team_stats_by_place[placing]
+            post_mu_sum, post_sigma_rms, post_team_rating = baseline_team_stats_by_place[placing]
+            pre_team_str = f"{pre_mu_sum:.2f} {pre_sigma_rms:.2f} ({pre_team_rating:.2f})"
+            post_team_str = f"{post_mu_sum:.2f} {post_sigma_rms:.2f} ({post_team_rating:.2f})"
         rows_req.append(
             [
-                f"{place}",
-                f"{name}",
-                pre_player_str,
+                str(placing),
+                names_map.get(pid) or pid,
+                f"{before.mu:.2f} {before.sigma:.2f} ({calculate_rating(before)})",
                 pre_team_str,
                 post_team_str,
-                post_player_str,
-                f"{delta_rating:+d}",
+                f"{after.mu:.2f} {after.sigma:.2f} ({calculate_rating(after)})",
+                f"{_live_rating_delta(before, after):+d}",
             ]
         )
+_render_table("Requested Summary Table (ordered by placing)", headers_req, rows_req)
 
-if _USE_RICH:
-    table_req = Table(title="Requested Summary Table (ordered by placing)", show_lines=False)
-    for h in headers_req:
-        table_req.add_column(h)
-    for r in rows_req:
-        table_req.add_row(*r)
-    _console.print(table_req)
-else:
-    print("\nRequested Summary Table (ordered by placing)")
-    print("=" * 120)
-    print(
-        "placing | player                                    | pregame_player_stats        | "
-        "pregame_team_stats           | postgame_team_stats          | postgame_player_stats       | rating_change"
-    )
-    print("-" * 120)
-    for r in rows_req:
-        print(
-            f"{r[0]:7} | {r[1]:42} | {r[2]:26} | {r[3]:26} | {r[4]:26} | {r[5]:26} | {r[6]:>13}"
-        )
-
-# Baseline rating_change per player (used for comparisons)
 baseline_rating_change = {
     pid: _live_rating_delta(before_ratings[pid], baseline_after_ratings[pid])
     for pid in before_ratings
 }
 
 
-# ----------------------------------------------------------------------
-# PIPELINE RUNNER (sigma cap -> unbalanced lobby -> gap penalty)
-# ----------------------------------------------------------------------
-def run_pipeline(apply_sigma_cap=False, apply_unbalanced=False, apply_gap_penalty=False, override_ratings=None):
+def run_pipeline(apply_unbalanced=False, apply_gap_penalty=False, override_ratings=None):
     base_teams = []
-    current_gm_any = []
-    current_gm_both = []
-
-    for idx, (pid0, pid1) in enumerate(team_order_ids):
-        r0 = override_ratings.get(pid0, before_ratings[pid0]) if override_ratings else before_ratings[pid0]
-        r1 = override_ratings.get(pid1, before_ratings[pid1]) if override_ratings else before_ratings[pid1]
-        current_gm_any.append(gm_team_any[idx])
-        current_gm_both.append(gm_team_both[idx])
-        base_teams.append([_clone_rating(model, r0), _clone_rating(model, r1)])
-
-    if apply_sigma_cap:
-        rate_input, _ = apply_sigma_cap_algo(
-            model,
-            base_teams,
-            current_gm_any,
-            team_order_ids,
-            logger=None,
-        )
-    else:
-        rate_input = []
-        for team_pair in base_teams:
-            rate_input.append(
-                [
-                    _clone_rating(model, team_pair[0]),
-                    _clone_rating(model, team_pair[1]),
-                ]
-            )
-
+    for team in team_order_ids:
+        current_team = []
+        for pid in team:
+            current_team.append(_clone_rating(model, override_ratings.get(pid, before_ratings[pid]) if override_ratings else before_ratings[pid]))
+        base_teams.append(current_team)
     adjusted_teams = None
     if apply_unbalanced:
         adjusted_teams, _ = check_for_unbalanced_lobby(
             model,
-            rate_input,
+            base_teams,
             logger=None,
-            gm_team_both_mask=current_gm_both if gm_mask_provided else None,
+            gm_team_eligible_mask=gm_team_unbalanced_eligible,
         )
-    else:
-        adjusted_teams = None
-    rate_input_final = adjusted_teams if adjusted_teams is not None else rate_input
-
+    rate_input_final = adjusted_teams if adjusted_teams is not None else base_teams
     rated_teams = model.rate(rate_input_final, ranks=ranks)
-
     new_teams_local = []
-    for team_idx in range(len(rate_input_final)):
-        orig_team = rate_input[team_idx]
-        old_final = rate_input_final[team_idx]
-        new_from_rate = rated_teams[team_idx]
-
+    for team_index in range(len(base_teams)):
+        original_team = base_teams[team_index]
+        adjusted_team = rate_input_final[team_index]
+        rated_team = rated_teams[team_index]
         final_team = []
-        for p_idx in range(len(orig_team)):
-            orig = orig_team[p_idx]
-            old_adj = old_final[p_idx]
-            new_adj = new_from_rate[p_idx]
-            delta_mu = new_adj.mu - old_adj.mu
-            delta_sigma = new_adj.sigma - old_adj.sigma
-            final_team.append(model.rating(mu=orig.mu + delta_mu, sigma=orig.sigma + delta_sigma))
+        for player_index in range(len(original_team)):
+            original = original_team[player_index]
+            adjusted = adjusted_team[player_index]
+            rated = rated_team[player_index]
+            final_team.append(
+                model.rating(
+                    mu=original.mu + (rated.mu - adjusted.mu),
+                    sigma=original.sigma + (rated.sigma - adjusted.sigma),
+                )
+            )
         new_teams_local.append(final_team)
-
     if apply_gap_penalty:
         apply_teammate_gap_penalty(
             model,
-            rate_input,
+            base_teams,
             new_teams_local,
-            logger=None,
-            gm_team_any=current_gm_any if gm_mask_provided else None,
-            team_player_ids=team_order_ids if gm_mask_provided else None,
-            recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
+            team_order_ids,
+            gap_scale_by_pid,
         )
-
     after_local = dict(before_ratings)
-    for idx, pair in enumerate(new_teams_local):
-        pid0, pid1 = team_order_ids[idx]
-        after_local[pid0] = pair[0]
-        after_local[pid1] = pair[1]
+    for team_index, team in enumerate(team_order_ids):
+        for player_index, pid in enumerate(team):
+            after_local[pid] = new_teams_local[team_index][player_index]
     return after_local
 
+
 def run_unbalanced_only(alpha_value):
-    prev_alpha = ranking_algo.UNBALANCED_PAIR_RATIO_ALPHA
+    previous_alpha = ranking_algo.UNBALANCED_PAIR_RATIO_ALPHA
     ranking_algo.UNBALANCED_PAIR_RATIO_ALPHA = alpha_value
     try:
-        ub_rate_input_local, ub_reductions_local = check_for_unbalanced_lobby(
+        adjusted_teams, reductions = check_for_unbalanced_lobby(
             model,
             teams_ratings,
             logger=None,
-            gm_team_both_mask=gm_team_both if gm_mask_provided else None,
+            gm_team_eligible_mask=gm_team_unbalanced_eligible,
         )
     finally:
-        ranking_algo.UNBALANCED_PAIR_RATIO_ALPHA = prev_alpha
-
-    if ub_rate_input_local is None:
-        ub_new_teams_local = new_teams
-        ub_reductions_local = [0.0] * len(team_order_ids)
-    else:
-        ub_rated_from_adjusted_local = model.rate(ub_rate_input_local, ranks=ranks)
-        ub_new_teams_local = []
-
-        for team_idx in range(len(teams_ratings)):
-            orig_team = teams_ratings[team_idx]
-            adj_old_team = ub_rate_input_local[team_idx]
-            adj_new_team = ub_rated_from_adjusted_local[team_idx]
-
-            final_team = []
-            for p_idx in range(len(orig_team)):
-                orig = orig_team[p_idx]
-                old_adj = adj_old_team[p_idx]
-                new_adj = adj_new_team[p_idx]
-                delta_mu = new_adj.mu - old_adj.mu
-                delta_sigma = new_adj.sigma - old_adj.sigma
-                final_team.append(model.rating(mu=orig.mu + delta_mu, sigma=orig.sigma + delta_sigma))
-            ub_new_teams_local.append(final_team)
-        if ub_reductions_local is None:
-            ub_reductions_local = [0.0] * len(team_order_ids)
-
-    ub_after_local = dict(before_ratings)
-    for idx, pair in enumerate(ub_new_teams_local):
-        pid0, pid1 = team_order_ids[idx]
-        ub_after_local[pid0] = pair[0]
-        ub_after_local[pid1] = pair[1]
-    return ub_after_local, ub_reductions_local
+        ranking_algo.UNBALANCED_PAIR_RATIO_ALPHA = previous_alpha
+    if adjusted_teams is None:
+        adjusted_teams = teams_ratings
+        reductions = [0.0] * len(teams_ratings)
+    rated_teams = model.rate(adjusted_teams, ranks=ranks)
+    after_local = dict(before_ratings)
+    for team_index, team in enumerate(team_order_ids):
+        for player_index, pid in enumerate(team):
+            original = teams_ratings[team_index][player_index]
+            adjusted = adjusted_teams[team_index][player_index]
+            rated = rated_teams[team_index][player_index]
+            after_local[pid] = model.rating(
+                mu=original.mu + (rated.mu - adjusted.mu),
+                sigma=original.sigma + (rated.sigma - adjusted.sigma),
+            )
+    return after_local, reductions
 
 
-# ----------------------------------------------------------------------
-# SIGMA-CAP summary table (aligned with stacked pipeline sigma-only stage)
-# ----------------------------------------------------------------------
-stack_after_sigma = run_pipeline(apply_sigma_cap=True, apply_unbalanced=False, apply_gap_penalty=False)
-
-scaled_input_by_pid = {}
-scaled_pre_team = {}
-sigma_cap_base_pairs = []
-for pid0, pid1 in team_order_ids:
-    sigma_cap_base_pairs.append([_clone_rating(model, before_ratings[pid0]), _clone_rating(model, before_ratings[pid1])])
-
-scaled_pairs, sigma_scale_by_pid = apply_sigma_cap_algo(
-    model,
-    sigma_cap_base_pairs,
-    gm_team_any,
-    team_order_ids,
-    logger=None,
-)
-
-for idx, team in enumerate(team_order_ids):
-    place = placing_with_team[idx][0]
-    p0, p1 = team
-    c0, c1 = scaled_pairs[idx]
-    scaled_input_by_pid[p0] = c0
-    scaled_input_by_pid[p1] = c1
-    mu_sum = before_ratings[p0].mu + before_ratings[p1].mu
-    sig_rms = math.hypot(c0.sigma, c1.sigma)
-    team_rt = _simple_rating(mu_sum, sig_rms)
-    scaled_pre_team[place] = (mu_sum, sig_rms, team_rt)
-
-sigma_post_team = {}
-for place, team in placing_with_team:
-    a0 = stack_after_sigma[team[0]]
-    a1 = stack_after_sigma[team[1]]
-    mu_sum = a0.mu + a1.mu
-    sig_rms = math.hypot(a0.sigma, a1.sigma)
-    team_rt = _simple_rating(mu_sum, sig_rms)
-    sigma_post_team[place] = (mu_sum, sig_rms, team_rt)
-
-headers_sigma = [
-    "placing",
-    "player",
-    "pregame_player_stats",
-    "pregame_team_stats",
-    "postgame_team_stats",
-    "postgame_player_stats",
-    "rating_change",
-    "rating_change_diff",
-    "sigma_cap_scale",
-]
-rows_sigma = []
-sigma_rating_change_by_pid = {}
-sigma_rating_diff_by_pid = {}
-
-for place, team in placing_with_team:
-    for idx, pid in enumerate(team):
-        name = names_map.get(pid) or pid
-
-        b = before_ratings[pid]
-        a = stack_after_sigma[pid]
-        pre_player_rating = calculate_rating(b)
-        pre_player_str = f"{b.mu:.2f} {b.sigma:.2f} ({pre_player_rating})"
-        post_player_rating = calculate_rating(a)
-        post_player_str = f"{a.mu:.2f} {a.sigma:.2f} ({post_player_rating})"
-
-        delta_rating = post_player_rating - pre_player_rating
-        delta_diff = delta_rating - baseline_rating_change[pid]
-        sigma_rating_change_by_pid[pid] = delta_rating
-        sigma_rating_diff_by_pid[pid] = delta_diff
-
-        if idx == 0:
-            mu_t, sg_t, rt_t = scaled_pre_team[place]
-            pre_team_str = f"{mu_t:.2f} {sg_t:.2f} ({rt_t:.2f})"
-            mu_u, sg_u, rt_u = sigma_post_team[place]
-            sigma_team_str = f"{mu_u:.2f} {sg_u:.2f} ({rt_u:.2f})"
-        else:
-            pre_team_str = ""
-            sigma_team_str = ""
-
-        scale_val = sigma_scale_by_pid.get(pid, 1.0)
-
-        rows_sigma.append(
-            [
-                f"{place}",
-                f"{name}",
-                pre_player_str,
-                pre_team_str,
-                sigma_team_str,
-                post_player_str,
-                f"{delta_rating:+d}",
-                f"{delta_diff:+d}",
-                f"{scale_val:.4f}",
-            ]
-        )
-
-if _USE_RICH:
-    table_sigma = Table(title="SIGMA-CAP summary table (ordered by placing)", show_lines=False)
-    for h in headers_sigma:
-        table_sigma.add_column(h)
-    for r in rows_sigma:
-        table_sigma.add_row(*r)
-    _console.print(table_sigma)
-else:
-    print("\nSIGMA-CAP summary table (ordered by placing)")
-    print("=" * 220)
-    print(
-        "placing | player                                    | pregame_player_stats        | pregame_team_stats           | "
-        "postgame_team_stats            | postgame_player_stats         | rating_change | rating_change_diff | sigma_cap_scale"
-    )
-    print("-" * 220)
-    for r in rows_sigma:
-        print(
-            f"{r[0]:7} | {r[1]:42} | {r[2]:26} | {r[3]:26} | {r[4]:26} | {r[5]:26} | {r[6]:>23} | {r[7]:>18} | {r[8]:>13}"
-        )
-
-# ----------------------------------------------------------------------
-# GAP-PENALTY summary table (ordered by placing)
-# ----------------------------------------------------------------------
-gap_new_teams = [pair.copy() for pair in new_teams]
-gap_pct_by_pid = {}
-gap_scale_by_pid = {}
+gap_new_teams = [[_clone_rating(model, rating) for rating in team] for team in baseline_rated]
 apply_teammate_gap_penalty(
     model,
     teams_ratings,
     gap_new_teams,
-    logger=None,
-    gm_team_any=gm_team_any if gm_mask_provided else None,
-    team_player_ids=team_order_ids if gm_mask_provided else None,
-    gap_pct_by_pid=gap_pct_by_pid,
-    gap_scale_by_pid=gap_scale_by_pid,
-    recent_teammate_repeat_by_pid=recent_teammate_repeat_by_pid,
+    team_order_ids,
+    gap_scale_by_pid,
 )
-
 gap_after = dict(before_ratings)
-for idx, pair in enumerate(gap_new_teams):
-    pid0, pid1 = team_order_ids[idx]
-    gap_after[pid0] = pair[0]
-    gap_after[pid1] = pair[1]
-
-gap_post_team = {}
-for place, team in placing_with_team:
-    a0 = gap_after[team[0]]
-    a1 = gap_after[team[1]]
-    mu_sum = a0.mu + a1.mu
-    sig_rms = math.hypot(a0.sigma, a1.sigma)
-    team_rt = _simple_rating(mu_sum, sig_rms)
-    gap_post_team[place] = (mu_sum, sig_rms, team_rt)
+for team_index, team in enumerate(team_order_ids):
+    for player_index, pid in enumerate(team):
+        gap_after[pid] = gap_new_teams[team_index][player_index]
 
 headers_gap = [
     "placing",
@@ -794,174 +498,64 @@ headers_gap = [
     "postgame_player_stats",
     "rating_change",
     "rating_change_diff",
-    "mu_gap_repeat",
-    "mu_gap_norepeat",
+    "team_gap_repeat",
+    "team_gap_norepeat",
 ]
 rows_gap = []
 gap_rating_change_by_pid = {}
-gap_rating_diff_by_pid = {}
-gap_repeat_by_pid = {}
-gap_norepeat_by_pid = {}
-
-for place, team in placing_with_team:
-    if gm_mask_provided and not gm_team_any[place - 1]:
-        continue
-    r0 = before_ratings[team[0]]
-    r1 = before_ratings[team[1]]
-    if r0.mu >= r1.mu:
-        hi_pid, hi_rating, lo_rating = team[0], r0, r1
-    else:
-        hi_pid, hi_rating, lo_rating = team[1], r1, r0
-    gap_pct_val = gap_pct_by_pid.get(hi_pid)
-    scale_val = gap_scale_by_pid.get(hi_pid)
-    if gap_pct_val is None or scale_val is None:
-        continue
-    relative_scale = _teammate_penalty_scale_gap_pct(gap_pct_val)
-    fresh_scale = _teammate_penalty_scale_gap_pct(gap_pct_val, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION)
-    gap_repeat_by_pid[hi_pid] = f"{gap_pct_val*100:.1f}% (scale: {relative_scale*100:.1f}%)"
-    gap_norepeat_by_pid[hi_pid] = f"{gap_pct_val*100:.1f}% (scale: {fresh_scale*100:.1f}%)"
-
-for place, team in placing_with_team:
-    show_gap = gm_team_any[place - 1] if gm_mask_provided else True
-
-    for idx, pid in enumerate(team):
-        name = names_map.get(pid) or pid
-
-        b = before_ratings[pid]
-        pre_player_rating = calculate_rating(b)
-        pre_player_str = f"{b.mu:.2f} {b.sigma:.2f} ({pre_player_rating})"
-
-        a_gap = gap_after[pid]
-        post_player_gap_rating = calculate_rating(a_gap)
-        post_player_gap_str = f"{a_gap.mu:.2f} {a_gap.sigma:.2f} ({post_player_gap_rating})"
-
-        delta_rating = post_player_gap_rating - pre_player_rating
-        delta_diff = delta_rating - baseline_rating_change[pid]
+for team_index, (placing, team) in enumerate(placing_with_team):
+    post_gap_team_stats = _team_stats([gap_after[pid] for pid in team])
+    for player_index, pid in enumerate(team):
+        before = before_ratings[pid]
+        after = gap_after[pid]
+        repeat_text = ""
+        norepeat_text = ""
+        if pid in gap_pct_by_pid and pid in gap_scale_by_pid:
+            gap_pct = gap_pct_by_pid[pid]
+            repeat_scale = _teammate_penalty_scale_gap_pct(gap_pct)
+            norepeat_scale = _teammate_penalty_scale_gap_pct(gap_pct, FRESH_GAP_TRIGGER, FRESH_GAP_SATURATION)
+            repeat_text = f"{gap_pct * 100:.1f}% (scale: {repeat_scale * 100:.1f}%)"
+            norepeat_text = f"{gap_pct * 100:.1f}% (scale: {norepeat_scale * 100:.1f}%)"
+        pre_team_str = ""
+        post_team_str = ""
+        if player_index == 0:
+            pre_mu_sum, pre_sigma_rms, pre_team_rating = pre_team_stats_by_place[placing]
+            post_mu_sum, post_sigma_rms, post_team_rating = post_gap_team_stats
+            pre_team_str = f"{pre_mu_sum:.2f} {pre_sigma_rms:.2f} ({pre_team_rating:.2f})"
+            post_team_str = f"{post_mu_sum:.2f} {post_sigma_rms:.2f} ({post_team_rating:.2f})"
+        delta_rating = _live_rating_delta(before, after)
         gap_rating_change_by_pid[pid] = delta_rating
-        gap_rating_diff_by_pid[pid] = delta_diff
-
-        if idx == 0:
-            mu_pre_t, sg_pre_t, rt_pre_t = pre_team[place]
-            pre_team_str = f"{mu_pre_t:.2f} {sg_pre_t:.2f} ({rt_pre_t:.2f})"
-            mu_post_t, sg_post_t, rt_post_t = post_team[place]
-            post_team_base_str = f"{mu_post_t:.2f} {sg_post_t:.2f} ({rt_post_t:.2f})"
-        else:
-            pre_team_str = ""
-            post_team_base_str = ""
-        mu_gap_repeat_str = gap_repeat_by_pid.get(pid, "") if show_gap else ""
-        mu_gap_norepeat_str = gap_norepeat_by_pid.get(pid, "") if show_gap else ""
-
         rows_gap.append(
             [
-                f"{place}",
-                f"{name}",
-                pre_player_str,
+                str(placing),
+                names_map.get(pid) or pid,
+                f"{before.mu:.2f} {before.sigma:.2f} ({calculate_rating(before)})",
                 pre_team_str,
-                post_team_base_str,
-                post_player_gap_str,
+                post_team_str,
+                f"{after.mu:.2f} {after.sigma:.2f} ({calculate_rating(after)})",
                 f"{delta_rating:+d}",
-                f"{delta_diff:+d}",
-                mu_gap_repeat_str,
-                mu_gap_norepeat_str,
+                f"{delta_rating - baseline_rating_change[pid]:+d}",
+                repeat_text,
+                norepeat_text,
             ]
         )
+_render_table("Gap-Penalty Summary Table (ordered by placing)", headers_gap, rows_gap)
 
-if _USE_RICH:
-    table_gap = Table(title="GAP-PENALTY summary table (ordered by placing)", show_lines=False)
-    for h in headers_gap:
-        table_gap.add_column(h)
-    for r in rows_gap:
-        table_gap.add_row(*r)
-    _console.print(table_gap)
-else:
-    print("\nGAP-PENALTY summary table (ordered by placing)")
-    print("=" * 220)
-    print(
-        "placing | player | pregame_player_stats | pregame_team_stats | "
-        "postgame_team_stats | postgame_player_stats | rating_change | rating_change_diff | mu_gap"
-    )
-    print("-" * 220)
-    for r in rows_gap:
-        print(
-            f"{r[0]:7} | {r[1]:42} | {r[2]:26} | {r[3]:26} | {r[4]:26} | "
-            f"{r[5]:26} | {r[6]:>13} | {r[7]:>18} | {r[8]:>20}"
-        )
-
-# ----------------------------------------------------------------------
-# UNBALANCED-LOBBY summary table (ordered by placing)
-# ----------------------------------------------------------------------
 ub_alpha_current = float(UNBALANCED_PAIR_RATIO_ALPHA)
 ub_alpha_zero = 0.0
-_ub_after_alpha0, ub_reductions_alpha0 = run_unbalanced_only(ub_alpha_zero)
+ub_after_alpha0, ub_reductions_alpha0 = run_unbalanced_only(ub_alpha_zero)
 ub_after, ub_reductions = run_unbalanced_only(ub_alpha_current)
 
-ub_post_team = {}
-for place, team in placing_with_team:
-    a0 = ub_after[team[0]]
-    a1 = ub_after[team[1]]
-    mu_sum = a0.mu + a1.mu
-    sig_rms = math.hypot(a0.sigma, a1.sigma)
-    team_rt = _simple_rating(mu_sum, sig_rms)
-    ub_post_team[place] = (mu_sum, sig_rms, team_rt)
-
 team_mu_sum_by_place = {}
-for place, team in placing_with_team:
-    b0 = before_ratings[team[0]]
-    b1 = before_ratings[team[1]]
-    team_mu_sum_by_place[place] = b0.mu + b1.mu
-
-sorted_team_mu_sums = sorted(team_mu_sum_by_place.values(), reverse=True)
-if sorted_team_mu_sums:
-    mid = len(sorted_team_mu_sums) // 2
-    if len(sorted_team_mu_sums) % 2 == 1:
-        median_team_mu_value = sorted_team_mu_sums[mid]
-    else:
-        median_team_mu_value = (sorted_team_mu_sums[mid - 1] + sorted_team_mu_sums[mid]) / 2.0
-else:
-    median_team_mu_value = 0.0
-
-ub_pre_team = {}
-for idx, (place, team) in enumerate(placing_with_team):
-    reduction_pct = ub_reductions[idx] if ub_reductions and idx < len(ub_reductions) else 0.0
-    mu_sum = before_ratings[team[0]].mu + before_ratings[team[1]].mu
-    adj_mu_sum = mu_sum * (1.0 - reduction_pct)
-    sig_rms = math.hypot(before_ratings[team[0]].sigma, before_ratings[team[1]].sigma)
-    team_rt = _simple_rating(adj_mu_sum, sig_rms)
-    ub_pre_team[place] = (adj_mu_sum, sig_rms, team_rt)
-
-team_base_gap_by_place = {}
-team_pair_ratio_by_place = {}
-team_effective_gap_alpha0_by_place = {}
-team_effective_gap_alpha_current_by_place = {}
-team_reduction_alpha0_by_place = {}
-team_reduction_alpha_current_by_place = {}
-for idx, (place, team) in enumerate(placing_with_team):
-    show_lobby = gm_team_both[place - 1] if gm_mask_provided else True
-    team_mu_sum = team_mu_sum_by_place[place]
-    if show_lobby and median_team_mu_value > 0.0:
-        base_gap_pct = max(0.0, (team_mu_sum - median_team_mu_value) / median_team_mu_value)
-    else:
-        base_gap_pct = 0.0
-    pair_ratio_scale_current = _unbalanced_pair_ratio_scale(teams_ratings[idx], alpha=ub_alpha_current)
-    pair_ratio_value = 0.0
-    if teams_ratings[idx][0].mu >= teams_ratings[idx][1].mu:
-        mu_hi = teams_ratings[idx][0].mu
-        mu_lo = teams_ratings[idx][1].mu
-    else:
-        mu_hi = teams_ratings[idx][1].mu
-        mu_lo = teams_ratings[idx][0].mu
-    if mu_hi > 0.0:
-        pair_ratio_value = mu_lo / mu_hi
-
-    effective_gap_alpha0 = base_gap_pct
-    effective_gap_alpha_current = base_gap_pct * pair_ratio_scale_current
-
-    team_base_gap_by_place[place] = base_gap_pct
-    team_pair_ratio_by_place[place] = pair_ratio_value
-    team_effective_gap_alpha0_by_place[place] = effective_gap_alpha0
-    team_effective_gap_alpha_current_by_place[place] = effective_gap_alpha_current
-    team_reduction_alpha0_by_place[place] = ub_reductions_alpha0[idx] if idx < len(ub_reductions_alpha0) else 0.0
-    team_reduction_alpha_current_by_place[place] = ub_reductions[idx] if idx < len(ub_reductions) else 0.0
+for placing, team in placing_with_team:
+    team_mu_sum_by_place[placing] = sum(before_ratings[pid].mu for pid in team)
+sorted_team_mu_sums = sorted(team_mu_sum_by_place.values())
+mid = len(sorted_team_mu_sums) // 2
+median_team_mu_value = (
+    (sorted_team_mu_sums[mid - 1] + sorted_team_mu_sums[mid]) / 2.0
+    if len(sorted_team_mu_sums) % 2 == 0
+    else sorted_team_mu_sums[mid]
+)
 
 headers_ub = [
     "placing",
@@ -974,173 +568,91 @@ headers_ub = [
     f"lobby_diff_a{ub_alpha_zero:g}",
     f"lobby_diff_a{ub_alpha_current:g}",
 ]
-rows_ub = []
-ub_rating_change_by_pid = {}
-ub_rating_diff_by_pid = {}
-
-for place, team in placing_with_team:
-    show_lobby = gm_team_both[place - 1] if gm_mask_provided else True
-    if show_lobby and team_base_gap_by_place[place] > 0.0:
-        scale_alpha0 = 1.0 - team_reduction_alpha0_by_place[place]
-        scale_alpha_current = 1.0 - team_reduction_alpha_current_by_place[place]
-        lobby_diff_alpha0_str = (
-            f"{team_base_gap_by_place[place] * 100:.1f}% "
-            f"(scale: {scale_alpha0 * 100:.1f}%)"
-        )
-        lobby_diff_alpha_current_str = (
-            f"{team_effective_gap_alpha_current_by_place[place] * 100:.1f}% "
-            f"(scale: {scale_alpha_current * 100:.1f}%)"
-        )
-    else:
-        lobby_diff_alpha0_str = ""
-        lobby_diff_alpha_current_str = ""
-
-    for idx, pid in enumerate(team):
-        name = names_map.get(pid) or pid
-
-        b = before_ratings[pid]
-        pre_player_rating = calculate_rating(b)
-        pre_player_str = f"{b.mu:.2f} {b.sigma:.2f} ({pre_player_rating})"
-
-        a_ub = ub_after[pid]
-        post_player_ub_rating = calculate_rating(a_ub)
-        post_player_ub_str = f"{a_ub.mu:.2f} {a_ub.sigma:.2f} ({post_player_ub_rating})"
-
-        delta_rating = post_player_ub_rating - pre_player_rating
-        delta_diff = delta_rating - baseline_rating_change[pid]
-        ub_rating_change_by_pid[pid] = delta_rating
-        ub_rating_diff_by_pid[pid] = delta_diff
-
-        if idx == 0:
-            mu_pre_t, sg_pre_t, rt_pre_t = ub_pre_team[place]
-            pre_team_str = f"{mu_pre_t:.2f} {sg_pre_t:.2f} ({rt_pre_t:.2f})"
-
-            mu_post_t, sg_post_t, rt_post_t = ub_post_team[place]
-            post_team_str = f"{mu_post_t:.2f} {sg_post_t:.2f} ({rt_post_t:.2f})"
-        else:
-            pre_team_str = ""
-            post_team_str = ""
-
-        rows_ub.append(
-            [
-                f"{place}",
-                f"{name}",
-                pre_player_str,
-                pre_team_str,
-                post_team_str,
-                post_player_ub_str,
-                f"{baseline_rating_change[pid]:+d} ({delta_diff:+d})",
-                lobby_diff_alpha0_str,
-                lobby_diff_alpha_current_str,
-            ]
-        )
-
 headers_ub_alpha_compare = [
     "placing",
     "team",
     "base_gap",
-    "pair_ratio",
+    "spread_ratio",
     "effective_gap_a0",
     f"effective_gap_a{ub_alpha_current:g}",
     "reduction_a0",
     f"reduction_a{ub_alpha_current:g}",
 ]
+rows_ub = []
 rows_ub_alpha_compare = []
-for place, team in placing_with_team:
-    team_name = f"{names_map.get(team[0]) or team[0]} + {names_map.get(team[1]) or team[1]}"
+ub_rating_change_by_pid = {}
+for team_index, (placing, team) in enumerate(placing_with_team):
+    team_before = teams_ratings[team_index]
+    team_mu_sum = team_mu_sum_by_place[placing]
+    base_gap_pct = 0.0
+    if gm_team_unbalanced_eligible[team_index] and median_team_mu_value > 0.0:
+        base_gap_pct = max(0.0, (team_mu_sum - median_team_mu_value) / median_team_mu_value)
+    spread_ratio = ranking_algo._unbalanced_team_ratio_scale(team_before, alpha=ub_alpha_current)
+    effective_gap_a0 = base_gap_pct
+    effective_gap_current = base_gap_pct * spread_ratio
+    reduction_a0 = ub_reductions_alpha0[team_index]
+    reduction_current = ub_reductions[team_index]
     rows_ub_alpha_compare.append(
         [
-            f"{place}",
-            team_name,
-            f"{team_base_gap_by_place[place] * 100:.2f}%",
-            f"{team_pair_ratio_by_place[place]:.4f}",
-            f"{team_effective_gap_alpha0_by_place[place] * 100:.2f}%",
-            f"{team_effective_gap_alpha_current_by_place[place] * 100:.2f}%",
-            f"{team_reduction_alpha0_by_place[place] * 100:.2f}%",
-            f"{team_reduction_alpha_current_by_place[place] * 100:.2f}%",
+            str(placing),
+            _team_label(team, names_map),
+            f"{base_gap_pct * 100:.2f}%",
+            f"{spread_ratio:.4f}",
+            f"{effective_gap_a0 * 100:.2f}%",
+            f"{effective_gap_current * 100:.2f}%",
+            f"{reduction_a0 * 100:.2f}%",
+            f"{reduction_current * 100:.2f}%",
         ]
     )
-
-if _USE_RICH:
-    table_ub = Table(
-        title=(
-            f"UNBALANCED-LOBBY summary table (ordered by placing)\n"
-            f"median team mu: {median_team_mu_value:.2f}, alpha={ub_alpha_current:g}"
-        ),
-        show_lines=False,
+    ub_pre_team_stats = _team_stats(
+        [
+            model.rating(
+                mu=before_ratings[pid].mu * (1.0 - reduction_current),
+                sigma=before_ratings[pid].sigma,
+            )
+            for pid in team
+        ]
     )
-    for h in headers_ub:
-        table_ub.add_column(h)
-    for r in rows_ub:
-        table_ub.add_row(*r)
-    _console.print(table_ub)
-    table_ub_alpha_compare = Table(
-        title=(
-            "UNBALANCED-LOBBY alpha comparison (team-level)\n"
-            f"alpha0={ub_alpha_zero:g}, alpha_current={ub_alpha_current:g}"
-        ),
-        show_lines=False,
-    )
-    for h in headers_ub_alpha_compare:
-        table_ub_alpha_compare.add_column(h)
-    for r in rows_ub_alpha_compare:
-        table_ub_alpha_compare.add_row(*r)
-    _console.print(table_ub_alpha_compare)
-else:
-    print("\nUNBALANCED-LOBBY summary table (ordered by placing)")
-    print("=" * 220)
-    print(f"median team mu: {median_team_mu_value:.2f}, alpha={ub_alpha_current:g}")
-    print(
-        "placing | player | pregame_player_stats | pregame_team_stats | "
-        "postgame_team_stats | postgame_player_stats | "
-        f"rating_change_base (+ub_a{ub_alpha_current:g}_diff) | "
-        f"lobby_diff_a{ub_alpha_zero:g} | lobby_diff_a{ub_alpha_current:g}"
-    )
-    print("-" * 220)
-    for r in rows_ub:
-        print(
-            f"{r[0]:7} | {r[1]:42} | {r[2]:26} | {r[3]:26} | {r[4]:26} | "
-            f"{r[5]:26} | {r[6]:>18} | {r[7]:>24} | {r[8]:>24}"
+    ub_post_team_stats = _team_stats([ub_after[pid] for pid in team])
+    lobby_diff_alpha0 = ""
+    lobby_diff_alpha_current = ""
+    if gm_team_unbalanced_eligible[team_index] and base_gap_pct > 0.0:
+        lobby_diff_alpha0 = f"{effective_gap_a0 * 100:.1f}% (scale: {(1.0 - reduction_a0) * 100:.1f}%)"
+        lobby_diff_alpha_current = f"{effective_gap_current * 100:.1f}% (scale: {(1.0 - reduction_current) * 100:.1f}%)"
+    for player_index, pid in enumerate(team):
+        before = before_ratings[pid]
+        after = ub_after[pid]
+        pre_team_str = ""
+        post_team_str = ""
+        if player_index == 0:
+            pre_mu_sum, pre_sigma_rms, pre_team_rating = ub_pre_team_stats
+            post_mu_sum, post_sigma_rms, post_team_rating = ub_post_team_stats
+            pre_team_str = f"{pre_mu_sum:.2f} {pre_sigma_rms:.2f} ({pre_team_rating:.2f})"
+            post_team_str = f"{post_mu_sum:.2f} {post_sigma_rms:.2f} ({post_team_rating:.2f})"
+        delta_rating = _live_rating_delta(before, after)
+        ub_rating_change_by_pid[pid] = delta_rating
+        rows_ub.append(
+            [
+                str(placing),
+                names_map.get(pid) or pid,
+                f"{before.mu:.2f} {before.sigma:.2f} ({calculate_rating(before)})",
+                pre_team_str,
+                post_team_str,
+                f"{after.mu:.2f} {after.sigma:.2f} ({calculate_rating(after)})",
+                f"{baseline_rating_change[pid]:+d} ({delta_rating - baseline_rating_change[pid]:+d})",
+                lobby_diff_alpha0,
+                lobby_diff_alpha_current,
+            ]
         )
-    print("\nUNBALANCED-LOBBY alpha comparison (team-level)")
-    print("=" * 180)
-    print(f"alpha0={ub_alpha_zero:g}, alpha_current={ub_alpha_current:g}")
-    print(
-        "placing | team | base_gap | pair_ratio | effective_gap_a0 | "
-        f"effective_gap_a{ub_alpha_current:g} | reduction_a0 | reduction_a{ub_alpha_current:g}"
-    )
-    print("-" * 180)
-    for r in rows_ub_alpha_compare:
-        print(
-            f"{r[0]:7} | {r[1]:42} | {r[2]:>10} | {r[3]:>10} | {r[4]:>16} | "
-            f"{r[5]:>18} | {r[6]:>12} | {r[7]:>18}"
-        )
+_render_table("Unbalanced-Lobby Summary Table (ordered by placing)", headers_ub, rows_ub)
+_render_table("Unbalanced-Lobby Alpha Comparison (team-level)", headers_ub_alpha_compare, rows_ub_alpha_compare)
 
-# ----------------------------------------------------------------------
-# COMBINED STACKED-PENALTY table (sigma-cap -> unbalanced lobby -> gap penalty)
-# ----------------------------------------------------------------------
-stack_after_unbalanced = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=False)
-stack_after_gap = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=True)
-
-stack_sigma_change_by_pid = {
-    pid: _live_rating_delta(before_ratings[pid], stack_after_sigma[pid])
-    for pid in before_ratings
-}
-stack_unbalanced_change_by_pid = {
-    pid: _live_rating_delta(before_ratings[pid], stack_after_unbalanced[pid])
-    for pid in before_ratings
-}
-stack_gap_change_by_pid = {
-    pid: _live_rating_delta(before_ratings[pid], stack_after_gap[pid])
-    for pid in before_ratings
-}
-
+stack_after_unbalanced = run_pipeline(apply_unbalanced=True, apply_gap_penalty=False)
+stack_after_gap = run_pipeline(apply_unbalanced=True, apply_gap_penalty=True)
 headers_combo = [
     "placing",
     "player",
     "rating_change_base",
-    "sigma_cap_effect",
-    "rating_change_after_sigma",
     "unbalanced_grace_effect",
     "rating_change_after_unbalanced",
     "team_gap_effect",
@@ -1148,291 +660,147 @@ headers_combo = [
     "final_rating_change",
 ]
 rows_combo = []
-
-for place, team in placing_with_team:
+for placing, team in placing_with_team:
     for pid in team:
-        name = names_map.get(pid) or pid
-
         base_change = baseline_rating_change[pid]
-        sigma_change = stack_sigma_change_by_pid[pid]
-        sigma_penalty = sigma_change - base_change
-        unbalanced_change = stack_unbalanced_change_by_pid[pid]
-        unbalanced_penalty = unbalanced_change - sigma_change
-        gap_change = stack_gap_change_by_pid[pid]
-        gap_penalty = gap_change - unbalanced_change
-        final_change = gap_change
-        recomposed_final = base_change + sigma_penalty + unbalanced_penalty + gap_penalty
-        if recomposed_final != final_change:
-            raise ValueError(
-                f"Stacked summary mismatch for {pid}: "
-                f"recomposed_final={recomposed_final}, final_change={final_change}"
-            )
-
+        unbalanced_change = _live_rating_delta(before_ratings[pid], stack_after_unbalanced[pid])
+        final_change = _live_rating_delta(before_ratings[pid], stack_after_gap[pid])
         rows_combo.append(
             [
-                f"{place}",
-                f"{name}",
+                str(placing),
+                names_map.get(pid) or pid,
                 f"{base_change:+d}",
-                f"{sigma_penalty:+d}",
-                f"{sigma_change:+d}",
-                f"{unbalanced_penalty:+d}",
+                f"{unbalanced_change - base_change:+d}",
                 f"{unbalanced_change:+d}",
-                f"{gap_penalty:+d}",
-                f"{gap_change:+d}",
+                f"{final_change - unbalanced_change:+d}",
+                f"{final_change:+d}",
                 f"{final_change:+d}",
             ]
         )
+_render_table("Stacked-Penalty Summary Table (ordered by placing)", headers_combo, rows_combo)
 
-if _USE_RICH:
-    combo_table = Table(title="STACKED-PENALTY summary table (ordered by placing)", show_lines=False)
-    for h in headers_combo:
-        combo_table.add_column(h)
-    for r in rows_combo:
-        combo_table.add_row(*r)
-    _console.print(combo_table)
-else:
-    print("\nSTACKED-PENALTY summary table (ordered by placing)")
-    print("=" * 220)
-    print(
-        "placing | player | rating_change_base | sigma_cap_effect | rating_change_after_sigma | "
-        "unbalanced_grace_effect | rating_change_after_unbalanced | team_gap_effect | rating_change_after_gap | final_rating_change"
-    )
-    print("-" * 220)
-    for r in rows_combo:
-        print(
-            f"{r[0]:7} | {r[1]:42} | {r[2]:>18} | {r[3]:>16} | {r[4]:>25} | "
-            f"{r[5]:>23} | {r[6]:>29} | {r[7]:>16} | {r[8]:>23} | {r[9]:>19}"
+headers_validation = [
+    "placing",
+    "player",
+    "recorded_rating_change",
+    "sim_rating_change",
+    "recorded_team_gap_pct",
+    "sim_team_gap_pct",
+    "recorded_team_gap_scale",
+    "sim_team_gap_scale",
+    "recorded_unbalanced_reduction_pct",
+    "sim_unbalanced_reduction_pct",
+]
+rows_validation = []
+for placing, team in placing_with_team:
+    for pid in team:
+        target_game = target_by_pid[pid]
+        modifier = production_modifiers.get(pid, {})
+        rows_validation.append(
+            [
+                str(placing),
+                names_map.get(pid) or pid,
+                f"{int(round(float(target_game['rating_change']))):+d}",
+                f"{_live_rating_delta(before_ratings[pid], production_after_ratings[pid]):+d}",
+                f"{float(target_game['team_gap_pct']):.6f}",
+                f"{float(modifier.get('gap_pct', 0.0)):.6f}",
+                f"{float(target_game['team_gap_scale']):.6f}",
+                f"{float(modifier.get('gap_scale', 1.0)):.6f}",
+                f"{float(target_game['unbalanced_reduction_pct']):.6f}",
+                f"{float(modifier.get('unbalanced_reduction_pct', 0.0)):.6f}",
+            ]
         )
+_render_table("Matchhistory Modifier Validation", headers_validation, rows_validation)
 
-teams_placings_rows = []
-for place, team in placing_with_team:
-    teams_placings_rows.append({"place": place, "player_a": team[0], "player_b": team[1]})
-
+teams_placings_rows = [{"place": placing, "players": list(team)} for placing, team in placing_with_team]
 per_player_changes_rows = []
 for pid in sorted(before_ratings.keys()):
-    b = before_ratings[pid]
-    a = production_after_ratings[pid]
+    before = before_ratings[pid]
+    after = production_after_ratings[pid]
     per_player_changes_rows.append(
         {
             "player_name": names_map.get(pid) or pid,
-            "mu_before": b.mu,
-            "mu_after": a.mu,
-            "delta_mu": a.mu - b.mu,
-            "sigma_before": b.sigma,
-            "sigma_after": a.sigma,
-            "delta_sigma": a.sigma - b.sigma,
+            "mu_before": before.mu,
+            "mu_after": after.mu,
+            "delta_mu": after.mu - before.mu,
+            "sigma_before": before.sigma,
+            "sigma_after": after.sigma,
+            "delta_sigma": after.sigma - before.sigma,
         }
     )
 
 gap_curve_xs = list(range(101))
-gap_curve_mu_high_reference = 40.0
-gap_curve_ys = [
-    _teammate_penalty_scale_gap_pct(x / 100.0) * 100.0
-    for x in gap_curve_xs
-]
-
+gap_curve_ys = [_teammate_penalty_scale_gap_pct(x / 100.0) * 100.0 for x in gap_curve_xs]
 report_payload = {
     "meta": {
-        "source_game_id": game_id,
+        "source_game_id": source_game_id,
         "input_mode": "clickhouse" if (args.game_id or args.region) else "file",
-        "input_path": None if (args.game_id or args.region) else input_path,
-        "region": region if (args.game_id or args.region) else None,
+        "input_path": input_path,
+        "region": region,
+        "arena_format": arena_format,
         "mu_rmse": mu_rmse,
-        "sigma_rmse": s_rmse,
+        "sigma_rmse": sigma_rmse,
         "median_team_mu": median_team_mu_value,
-        "recent_teammate_repeat_context": recent_teammate_repeat_by_pid is not None,
+        "recent_teammate_repeat_context": repeated_teammate_ids_by_pid is not None,
         "unbalanced_pair_ratio_alpha": ub_alpha_current,
+        "unbalanced_constant": float(ranking_algo.UNBALANCED_TEAM_MU_REDUCTION),
+        "unbalanced_3v3_breakpoint": float(ranking_algo.UNBALANCED_3V3_GRACE_BREAKPOINT),
+        "unbalanced_3v3_tail_slope": float(ranking_algo.UNBALANCED_3V3_GRACE_TAIL_SLOPE),
+        "sigma_floor": float(ranking_algo.SIGMA_FLOOR),
     },
     "teams_placings": teams_placings_rows,
     "per_player_changes": per_player_changes_rows,
     "target_comparison": target_comparison_rows,
     "tables": {
         "requested_summary": {"headers": headers_req, "rows": rows_req},
-        "sigma_cap_summary": {"headers": headers_sigma, "rows": rows_sigma},
         "gap_penalty_summary": {"headers": headers_gap, "rows": rows_gap},
         "unbalanced_lobby_summary": {"headers": headers_ub, "rows": rows_ub},
         "unbalanced_lobby_alpha_comparison": {"headers": headers_ub_alpha_compare, "rows": rows_ub_alpha_compare},
         "stacked_penalty_summary": {"headers": headers_combo, "rows": rows_combo},
+        "modifier_validation_summary": {"headers": headers_validation, "rows": rows_validation},
     },
     "charts": {
         "gap_penalty_curve": {
             "x_pct": gap_curve_xs,
             "y_multiplier_pct": gap_curve_ys,
-            "mu_high_reference": gap_curve_mu_high_reference,
         }
     },
 }
 
 if args.export_report:
-    output_dir = os.path.dirname(args.export_report) or "."
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(args.export_report) or ".", exist_ok=True)
     with open(args.export_report, "w", encoding="utf-8") as f:
         json.dump(report_payload, f, indent=2)
         f.write("\n")
     print(f"Wrote report JSON: {args.export_report}")
 
-# ----------------------------------------------------------------------
-# GAP-PENALTY CURVE chart
-# ----------------------------------------------------------------------
 if not args.no_charts:
     try:
         import matplotlib.pyplot as plt
 
-        xs = gap_curve_xs
-        ys = gap_curve_ys
-
         plt.figure(figsize=(8, 4))
-        plt.plot(xs, ys)
-        plt.title("GAP-PENALTY Scaling Curve")
-        plt.xlabel(f"Relative teammate μ gap (%) at μ_high={gap_curve_mu_high_reference:.1f}")
+        plt.plot(gap_curve_xs, gap_curve_ys)
+        plt.title("Gap-Penalty Scaling Curve")
+        plt.xlabel("Relative teammate mu gap (%)")
         plt.ylabel("Low-impact multiplier (%)")
         plt.xlim(0, 100)
         plt.ylim(0, 100)
         plt.grid(True)
         plt.show()
+    except Exception as exc:
+        print(f"Could not render gap-penalty chart: {exc}")
 
-    except Exception as e:
-        print(f"Could not render GAP-PENALTY chart: {e}")
-
-# ----------------------------------------------------------------------
-# Experiments 1 & 2 (Sigma & Mu impact curves)
-# ----------------------------------------------------------------------
-if not args.no_charts:
+if not args.no_charts and arena_format["name"] == "2x8":
     try:
         import openskill_sim_charts as experiments
 
         experiments.run_experiment_1(model, players, teams, placings)
         experiments.run_experiment_2(model, players, teams, placings)
-
-    except ImportError as e:
-        print(f"\nNote: Could not import openskill_sim_charts module: {e}")
-        print("Experiments 1 and 2 will be skipped.")
-    except Exception as e:
-        print(f"\nError running experiments 1/2: {e}")
-
-# ----------------------------------------------------------------------
-# EXPERIMENT 3: DECAY & RECOVERY ANALYSIS (Player 8)
-# ----------------------------------------------------------------------
-TARGET_ID = "p8"
-
-if not args.no_charts:
-    print(f"\nRunning Experiment 3: Inactivity Decay Analysis for {TARGET_ID}...")
-
-if not args.no_charts and TARGET_ID not in before_ratings:
-    print(f"Skipping Experiment 3: Player {TARGET_ID} not found in input.")
-if not args.no_charts and TARGET_ID in before_ratings:
-    try:
-        import matplotlib.pyplot as plt
-    except Exception as e:
-        print(f"Skipping Experiment 3: matplotlib not available ({e})")
-    else:
-        p_base = before_ratings[TARGET_ID]
-
-        # Use full production-ish pipeline as the baseline for comparison
-        prod_after = run_pipeline(apply_sigma_cap=True, apply_unbalanced=True, apply_gap_penalty=True)
-        prod_rating_change = {
-            pid: _simple_rating(prod_after[pid].mu, prod_after[pid].sigma)
-            - _simple_rating(before_ratings[pid].mu, before_ratings[pid].sigma)
-            for pid in before_ratings
-        }
-        base_change = prod_rating_change[TARGET_ID]
-
-        if abs(base_change) < 0.01:
-            print(f"Baseline change for {TARGET_ID} is too small ({base_change:.4f}) to calculate multipliers.")
-        else:
-            results_days = []
-            results_peak = []
-            results_avg = []
-            results_games = []
-
-            for day in range(31):
-                if day <= DECAY_GRACE_DAYS:
-                    start_sigma = p_base.sigma
-                else:
-                    base_r = _simple_rating(p_base.mu, p_base.sigma)
-                    decayed_r = base_r * (DECAY_FACTOR ** (day - DECAY_GRACE_DAYS))
-                    calc_sigma = (p_base.mu - (decayed_r / 75.0)) / 3.0
-                    start_sigma = min(calc_sigma, SIGMA_DECAY_CLAMP)
-
-                p_decayed = model.rating(mu=p_base.mu, sigma=start_sigma)
-
-                after_decay = run_pipeline(
-                    apply_sigma_cap=True,
-                    apply_unbalanced=True,
-                    apply_gap_penalty=True,
-                    override_ratings={TARGET_ID: p_decayed},
-                )
-
-                p_after = after_decay[TARGET_ID]
-                change_decayed = _simple_rating(p_after.mu, p_after.sigma) - _simple_rating(
-                    p_decayed.mu, p_decayed.sigma
-                )
-                peak_multiplier = change_decayed / base_change
-
-                curr_sigma = start_sigma
-                recovery_games = 0
-                total_mult = 0.0
-
-                while curr_sigma > p_base.sigma + 0.01:
-                    recovery_games += 1
-                    p_step_in = model.rating(mu=p_base.mu, sigma=curr_sigma)
-
-                    after_step = run_pipeline(
-                        apply_sigma_cap=True,
-                        apply_unbalanced=True,
-                        apply_gap_penalty=True,
-                        override_ratings={TARGET_ID: p_step_in},
-                    )
-                    p_step_out = after_step[TARGET_ID]
-
-                    step_change = _simple_rating(p_step_out.mu, p_step_out.sigma) - _simple_rating(
-                        p_step_in.mu, p_step_in.sigma
-                    )
-                    step_mult = step_change / base_change
-                    total_mult += step_mult
-
-                    curr_sigma = p_step_out.sigma
-
-                    if recovery_games > 50:
-                        break
-
-                avg_multiplier = (total_mult / recovery_games) if recovery_games > 0 else 1.0
-
-                results_days.append(day)
-                results_peak.append(peak_multiplier)
-                results_avg.append(avg_multiplier)
-                results_games.append(recovery_games)
-
-            plt.figure(figsize=(10, 6))
-            plt.plot(results_days, results_peak, label="Peak Multiplier (1st Game)", color="#d62728", marker="o", markersize=4)
-            plt.plot(results_days, results_avg, label="Avg Multiplier (Recovery)", color="#1f77b4", marker="s", markersize=4, linestyle="--")
-
-            last_g = -1
-            for day, val, games in zip(results_days, results_avg, results_games):
-                if day > DECAY_GRACE_DAYS and (games != last_g or day % 5 == 0):
-                    plt.annotate(
-                        f"{games}g",
-                        (day, val),
-                        textcoords="offset points",
-                        xytext=(0, 10),
-                        ha="center",
-                        fontsize=8,
-                        color="#1f77b4",
-                        fontweight="bold",
-                    )
-                    last_g = games
-
-            plt.title(
-                f"Inactivity Decay Analysis: {names_map.get(TARGET_ID, TARGET_ID)}\n"
-                f"(Base μ={p_base.mu:.1f}, σ={p_base.sigma:.2f})"
-            )
-            plt.xlabel("Days Inactive")
-            plt.ylabel("Rating Change Multiplier (vs Base)")
-            plt.axvline(x=DECAY_GRACE_DAYS, color="gray", linestyle=":", label="Grace Period Ends")
-            plt.grid(True, alpha=0.3)
-            plt.legend(loc="upper left")
-            plt.ylim(bottom=0.9)
-            plt.tight_layout()
-            plt.show()
+    except ImportError as exc:
+        print(f"\nNote: Could not import openskill_sim_charts module: {exc}")
+    except Exception as exc:
+        print(f"\nError running experiments 1/2: {exc}")
+elif not args.no_charts:
+    print("\nSkipping legacy 2v2 chart experiments for non-2x8 input.")
 
 print("\nDone.")

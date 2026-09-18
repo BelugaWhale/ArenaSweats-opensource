@@ -4,11 +4,18 @@ import tkinter as tk
 from tkinter import messagebox
 from tkinter import ttk
 
-from ranking_algorithm import UNBALANCED_TEAM_MU_REDUCTION, UNBALANCED_PAIR_RATIO_ALPHA
+from ranking_algorithm import (
+    UNBALANCED_3V3_GRACE_BREAKPOINT,
+    UNBALANCED_3V3_GRACE_TAIL_SLOPE,
+    UNBALANCED_PAIR_RATIO_ALPHA,
+    UNBALANCED_TEAM_MU_REDUCTION,
+    _unbalanced_grace_reduction_pct,
+)
 
 try:
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     from matplotlib.figure import Figure
+    from matplotlib.ticker import PercentFormatter
 
     _MATPLOTLIB_AVAILABLE = True
 except Exception:
@@ -18,10 +25,10 @@ except Exception:
 DEFAULT_DAYS = 180
 DEFAULT_GAP_BIN_SIZE = 0.02
 DEFAULT_MU_BIN_SIZE = 2.5
-ASYMPTOTE_Y = 0.20
-FORMULA_CURVE_SCALE_BY_QUANTILE = {"p90": 0.85, "p95": 0.95, "p99": 1.00}
-FORMULA_GAP_MAX = 1.50
-FORMULA_Y_MAX = 0.30
+CAPPED_ASYMPTOTE_Y = 0.20
+CAPPED_CURVE_SCALE = 0.95
+FORMULA_GAP_MAX = 1.00
+FORMULA_Y_MAX = 0.60
 FORMULA_GAP_STEP = 0.001
 
 
@@ -29,13 +36,11 @@ def _linear_reduction_pct(base_gap_pct):
     return UNBALANCED_TEAM_MU_REDUCTION * base_gap_pct
 
 
-def _smooth_tapered_reduction_pct(base_gap_pct, curve_scale):
-    if curve_scale <= 0.0 or curve_scale > 1.0:
-        raise ValueError("curve_scale must be in (0, 1]")
+def _capped_reduction_pct(base_gap_pct):
     if base_gap_pct <= 0.0:
         return 0.0
-    linear_scaled_gap = (UNBALANCED_TEAM_MU_REDUCTION / ASYMPTOTE_Y) * base_gap_pct
-    return ASYMPTOTE_Y * math.tanh(linear_scaled_gap * curve_scale)
+    linear_scaled_gap = (UNBALANCED_TEAM_MU_REDUCTION / CAPPED_ASYMPTOTE_Y) * base_gap_pct
+    return CAPPED_ASYMPTOTE_Y * math.tanh(linear_scaled_gap * CAPPED_CURVE_SCALE)
 
 
 def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status, log_console):
@@ -67,26 +72,15 @@ def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status
     )
     season_combo.grid(row=0, column=3, padx=(0, 14), pady=6, sticky="w")
 
-    ttk.Label(controls, text="Adaptive cap").grid(row=0, column=4, padx=(0, 8), pady=6, sticky="w")
-    cap_quantile_var = tk.StringVar(value="p95")
-    cap_quantile_combo = ttk.Combobox(
-        controls,
-        textvariable=cap_quantile_var,
-        values=["p90", "p95", "p99"],
-        width=8,
-        state="readonly",
-    )
-    cap_quantile_combo.grid(row=0, column=5, padx=(0, 14), pady=6, sticky="w")
-
     regenerate_btn = ttk.Button(controls, text="Regenerate")
-    regenerate_btn.grid(row=0, column=6, padx=(0, 8), pady=6, sticky="w")
+    regenerate_btn.grid(row=0, column=4, padx=(0, 8), pady=6, sticky="w")
 
     subtitle = ttk.Label(
         frame,
         text=(
-            "Chart 1 is formula-only and renders instantly. Chart 2 (higher_player_mu bins) loads from query on Regenerate. "
-            f"Linear reduction: {UNBALANCED_TEAM_MU_REDUCTION:.2f} * gap. "
-            f"Alternative (green): one smooth asymptotic curve toward y={ASYMPTOTE_Y:.2f}, always <= red."
+            "Chart 1 compares the selected tail-slope formula against uncapped grace and the previous cap. "
+            "Chart 2 loads historical recorded grace by player mu on Regenerate. "
+            f"Selected formula: {UNBALANCED_TEAM_MU_REDUCTION:.2f} through {UNBALANCED_3V3_GRACE_BREAKPOINT:.0%}, then {UNBALANCED_3V3_GRACE_TAIL_SLOPE:.2f}."
         ),
         style="Sub.TLabel",
     )
@@ -115,31 +109,36 @@ def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status
     }
 
     def _draw_formula_chart():
-        cap_key = cap_quantile_var.get().strip().lower()
-        if cap_key not in FORMULA_CURVE_SCALE_BY_QUANTILE:
-            raise ValueError(f"Unsupported cap quantile: {cap_key}")
-        curve_scale = FORMULA_CURVE_SCALE_BY_QUANTILE[cap_key]
         x_max = FORMULA_GAP_MAX
         x_count = int(x_max / FORMULA_GAP_STEP) + 1
         gap_x = [idx * FORMULA_GAP_STEP for idx in range(x_count)]
-        delta_linear = [_linear_reduction_pct(gap) for gap in gap_x]
-        delta_log = [_smooth_tapered_reduction_pct(gap, curve_scale) for gap in gap_x]
+        delta_uncapped = [_linear_reduction_pct(gap) for gap in gap_x]
+        delta_capped = [_capped_reduction_pct(gap) for gap in gap_x]
+        delta_selected = [_unbalanced_grace_reduction_pct(gap) for gap in gap_x]
 
         ax_delta.clear()
-        ax_delta.plot(gap_x, delta_linear, color="#c22e2e", linewidth=2.2, label="CURRENT (linear)")
-        ax_delta.plot(gap_x, delta_log, color="#217a4a", linewidth=2.2, label="NEW")
-        ax_delta.set_title("Current vs New - Unbalanced Lobby Grace")
-        ax_delta.set_xlabel("Team Skill - Lobby Avg Skill (%)")
-        ax_delta.set_ylabel("Unbalanced Lobby Grace given")
+        ax_delta.plot(gap_x, delta_uncapped, color="#c22e2e", linewidth=2.2, label="REFERENCE: uncapped 0.57 × gap")
+        ax_delta.plot(gap_x, delta_capped, color="#777777", linewidth=2.0, linestyle="--", label="PREVIOUS: capped tanh → 20%")
+        ax_delta.plot(
+            gap_x,
+            delta_selected,
+            color="#278a57",
+            linewidth=2.2,
+            label="SELECTED: 0.57 then 0.25 after 20%",
+        )
+        ax_delta.set_title("Unbalanced Lobby Grace Formula Comparison")
+        ax_delta.set_xlabel("Effective gap after internal team-balance scaling")
+        ax_delta.set_ylabel("Temporary mu reduction (more = more grace)")
         ax_delta.set_xlim(0.0, x_max)
         ax_delta.set_ylim(0.0, FORMULA_Y_MAX)
+        ax_delta.xaxis.set_major_formatter(PercentFormatter(1.0))
+        ax_delta.yaxis.set_major_formatter(PercentFormatter(1.0))
         ax_delta.grid(alpha=0.2)
         ax_delta.legend(loc="best", fontsize=8)
 
         if chart_state["dataset"] is None:
             summary_var.set(
-                f"curve_scale({cap_key})={curve_scale:.2f} | "
-                f"green_at_10%={_smooth_tapered_reduction_pct(0.10, curve_scale):.4f} | "
+                f"at 20%: uncapped={_linear_reduction_pct(0.20):.1%}, capped={_capped_reduction_pct(0.20):.1%}, selected={_unbalanced_grace_reduction_pct(0.20):.1%} | "
                 "press Regenerate for chart 2 data"
             )
         figure.suptitle(
@@ -170,22 +169,17 @@ def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status
         mu_recorded_min = [float(row["min_recorded_grace_pct"]) for row in mu_rows]
         mu_recorded_max = [float(row["max_recorded_grace_pct"]) for row in mu_rows]
         summary = dataset["summary"]
-        cap_key = cap_quantile_var.get().strip().lower()
-        if cap_key not in FORMULA_CURVE_SCALE_BY_QUANTILE:
-            raise ValueError(f"Unsupported cap quantile: {cap_key}")
-        curve_scale = FORMULA_CURVE_SCALE_BY_QUANTILE[cap_key]
 
         summary_var.set(
             f"rows={summary['sample_count']:,} | positive={summary['positive_gap_count']:,} | "
             f"pair_ratio_avg={summary['avg_pair_ratio']:.3f} | p90={summary['gap_p90']:.3f} | "
-            f"p95={summary['gap_p95']:.3f} | p99={summary['gap_p99']:.3f} | "
-            f"curve_scale({cap_key})={curve_scale:.2f}"
+            f"p95={summary['gap_p95']:.3f} | p99={summary['gap_p99']:.3f}"
         )
 
         ax_mu.clear()
         if mu_x:
-            ax_mu.fill_between(mu_x, mu_recorded_min, mu_recorded_max, color="#c22e2e", alpha=0.15, label="current min-max")
-            ax_mu.plot(mu_x, mu_recorded_avg, color="#c22e2e", linewidth=2.0, label="current avg")
+            ax_mu.fill_between(mu_x, mu_recorded_min, mu_recorded_max, color="#777777", alpha=0.15, label="historical min-max")
+            ax_mu.plot(mu_x, mu_recorded_avg, color="#777777", linewidth=2.0, label="historical capped avg")
             ax_mu.legend(loc="best", fontsize=7)
         else:
             ax_mu.text(0.5, 0.5, "No mu profile rows returned.", ha="center", va="center", transform=ax_mu.transAxes)
@@ -234,10 +228,6 @@ def install_tab(experiment_notebook, private_ch, region_to_ch_prefix, set_status
     regenerate_btn.configure(command=run_query)
     region_combo.bind("<<ComboboxSelected>>", lambda _event: (chart_state.__setitem__("dataset", None), _draw_mu_placeholder(), _draw_formula_chart(), set_status("Press Regenerate to load chart 2")))
     season_combo.bind("<<ComboboxSelected>>", lambda _event: (chart_state.__setitem__("dataset", None), _draw_mu_placeholder(), _draw_formula_chart(), set_status("Press Regenerate to load chart 2")))
-    cap_quantile_combo.bind(
-        "<<ComboboxSelected>>",
-        lambda _event: (_draw_formula_chart(), _draw_mu_chart() if chart_state["dataset"] is not None else None),
-    )
     _draw_mu_placeholder()
     _draw_formula_chart()
     return {
